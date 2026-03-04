@@ -531,7 +531,6 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         )
 
     @app.get("/api/health")
-    @login_required_api
     def health():
         status = service.get_status()
         status["ok"] = True
