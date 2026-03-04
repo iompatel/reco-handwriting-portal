@@ -1,0 +1,20 @@
+.venv/
+.venv*/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+
+# ML artifacts and local datasets
+checkpoints/
+data/
+outputs/
+outputs*.csv
+
+# Generated docs/screenshots/temp files
+output/
+tmp/
+
+# Local logs
+*.log

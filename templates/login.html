@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login | Handwriting Portal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='login.css') }}" />
+  </head>
+  <body>
+    <div class="bg-glow glow-a" aria-hidden="true"></div>
+    <div class="bg-glow glow-b" aria-hidden="true"></div>
+    <main class="auth-shell">
+      <section class="card intro">
+        <p class="kicker">RNN + OCR Workspace</p>
+        <h1>Handwriting Recognition Portal</h1>
+        <p class="intro-text">
+          Upload notebook images, run text detection, check results/history, and manage records from a single web portal.
+        </p>
+
+        <div class="feature-grid">
+          <article class="feature-pill">
+            <h3>Smart Detection</h3>
+            <p>RNN + OCR hybrid pipeline for handwritten notes.</p>
+          </article>
+          <article class="feature-pill">
+            <h3>Cleaner Results</h3>
+            <p>Filters for denoise, threshold, contrast, and notebook mode.</p>
+          </article>
+          <article class="feature-pill">
+            <h3>Role Support</h3>
+            <p>User history controls and admin management in one portal.</p>
+          </article>
+        </div>
+
+        <div class="info-strip">
+          <span>Secure auth flow</span>
+          <span>Speech support</span>
+          <span>SQLite backed</span>
+        </div>
+      </section>
+
+      <section class="card forms">
+        <div class="forms-head">
+          <h2>Welcome Back</h2>
+          <p>Login / Create Account / Reset Password</p>
+        </div>
+        <div id="auth-status" class="status"></div>
+
+        <form id="login-form" class="form-block">
+          <h2>Login</h2>
+          <label>
+            E-mail / Username
+            <input
+              id="login-username"
+              type="text"
+              required
+              minlength="3"
+              autocomplete="username"
+              placeholder="name@example.com"
+            />
+          </label>
+          <label>
+            Password
+            <div class="password-wrap">
+              <input id="login-password"
+               type="password"
+               required minlength="6"
+               autocomplete="current-password"
+               placeholder="Your Password"
+              />
+              <button
+                type="button"
+                class="toggle-password"
+                data-toggle-password
+                data-target="login-password"
+                aria-label="Show or hide login password"
+                aria-pressed="false"
+              >
+                Show
+              </button>
+            </div>
+          </label>
+          <button type="submit">Login</button>
+          <div class="form-links">
+            <button id="show-register" type="button" class="text-link">Create Account</button>
+            <button id="show-reset" type="button" class="text-link">Forgot Password?</button>
+          </div>
+        </form>
+
+        <form id="register-form" class="form-block is-hidden">
+          <h2>Create Account</h2>
+          <label>
+            Full name
+            <input id="reg-full-name" type="text" required minlength="2" autocomplete="name" placeholder="Enter your name" />
+          </label>
+          <label>
+            E-mail / Username
+            <input
+              id="reg-username"
+              type="text"
+              required
+              minlength="3"
+              autocomplete="username"
+              placeholder="name@example.com"
+            />
+          </label>
+          <label>
+            Password
+            <div class="password-wrap">
+              <input id="reg-password" type="password" required minlength="6" autocomplete="new-password" placeholder="Enter Password"/>
+              <button
+                type="button"
+                class="toggle-password"
+                data-toggle-password
+                data-target="reg-password"
+                aria-label="Show or hide create account password"
+                aria-pressed="false"
+              >
+                Show
+              </button>
+            </div>
+          </label>
+          <label>
+            Confirm password
+            <div class="password-wrap">
+              <input id="reg-confirm" type="password" required minlength="6" autocomplete="new-password" />
+              <button
+                type="button"
+                class="toggle-password"
+                data-toggle-password
+                data-target="reg-confirm"
+                aria-label="Show or hide confirm password"
+                aria-pressed="false"
+                placeholder="Confirm password"
+              >
+                Show
+              </button>
+            </div>
+          </label>
+          <button type="submit">Create Account</button>
+          <div class="form-links">
+            <button id="show-login-from-register" type="button" class="text-link">Back to Login</button>
+          </div>
+        </form>
+
+        <form id="reset-form" class="form-block is-hidden">
+          <h2>Reset Password</h2>
+          <label>
+            E-mail / Username
+            <input
+              id="reset-username"
+              type="text"
+              required
+              minlength="3"
+              autocomplete="username"
+              placeholder="name@example.com"
+            />
+          </label>
+          <label>
+            New password
+            <div class="password-wrap">
+              <input id="reset-new-password" type="password" required minlength="6" autocomplete="new-password" />
+              <button
+                type="button"
+                class="toggle-password"
+                data-toggle-password
+                data-target="reset-new-password"
+                aria-label="Show or hide reset password"
+                aria-pressed="false"
+              >
+                Show
+              </button>
+            </div>
+          </label>
+          <label>
+            Confirm new password
+            <div class="password-wrap">
+              <input id="reset-confirm" type="password" required minlength="6" autocomplete="new-password" />
+              <button
+                type="button"
+                class="toggle-password"
+                data-toggle-password
+                data-target="reset-confirm"
+                aria-label="Show or hide confirm reset password"
+                aria-pressed="false"
+              >
+                Show
+              </button>
+            </div>
+          </label>
+          <button type="submit">Reset Password</button>
+          <div class="form-links">
+            <button id="show-login-from-reset" type="button" class="text-link">Back to Login</button>
+            <button id="show-register-from-reset" type="button" class="text-link">Create Account</button>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <div id="global-loader" class="rnn-loader hidden" role="status" aria-live="polite" aria-label="Loading">
+      <div class="rnn-loader-card">
+        <div class="rnn-loader-track" aria-hidden="true">
+          <span class="rnn-loader-letter">R</span>
+          <span class="rnn-loader-letter">N</span>
+          <span class="rnn-loader-letter">N</span>
+        </div>
+        <p id="global-loader-message" class="rnn-loader-message">Loading...</p>
+      </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='login.js') }}"></script>
+  </body>
+</html>

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Detection History | Handwriting Recognition Portal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <main class="shell">
+      <header class="panel top-nav">
+        <div>
+          <p class="kicker">RNN</p>
+          <h1>Detection History</h1>
+        </div>
+        <div class="user-strip">
+          <div class="user-meta">
+            <p id="user-name" class="user-name">User</p>
+            <p id="user-role" class="user-role">role</p>
+          </div>
+          <a id="history-home-link" href="/" class="btn ghost nav-link-btn">Recognize Text</a>
+          <button
+            id="profile-toggle"
+            type="button"
+            class="btn ghost profile-toggle"
+            aria-expanded="false"
+            aria-label="Profile options"
+          >
+            <img id="profile-toggle-avatar" class="profile-toggle-avatar" alt="Profile" />
+          </button>
+          <div id="profile-menu" class="profile-menu hidden" role="dialog" aria-label="User profile">
+            <div class="profile-avatar-wrap">
+              <img id="profile-avatar-preview" class="profile-avatar" alt="Profile image" />
+              <label for="profile-avatar-input" class="btn ghost profile-avatar-btn">Upload Image</label>
+              <input
+                id="profile-avatar-input"
+                class="visually-hidden"
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+              />
+            </div>
+            <div class="profile-row">
+              <span class="profile-label">Name</span>
+              <span id="profile-name" class="profile-value">-</span>
+            </div>
+            <div class="profile-row">
+              <span class="profile-label">Email</span>
+              <span id="profile-email" class="profile-value">-</span>
+            </div>
+            <div class="profile-row">
+              <span class="profile-label">Role</span>
+              <span id="profile-role" class="profile-value">-</span>
+            </div>
+            <button id="profile-logout-btn" type="button" class="btn primary profile-logout">Logout</button>
+          </div>
+        </div>
+      </header>
+
+      <section class="panel history-panel history-page-panel">
+        <div class="section-head">
+          <h2>Detection History</h2>
+          <button id="refresh-history" type="button" class="btn ghost">Refresh</button>
+        </div>
+        <div id="admin-history-toolbar" class="history-filter-toolbar hidden">
+          <input
+            id="history-search-input"
+            type="text"
+            placeholder="Search by user id, name, e-mail, file, or text"
+          />
+          <select id="history-source-filter">
+            <option value="all" selected>All Sources</option>
+          </select>
+          <button id="history-filter-clear" type="button" class="btn ghost">Clear</button>
+          <p id="history-filter-count" class="history-filter-count">0 records</p>
+        </div>
+        <div id="history-status" class="status" aria-live="polite"></div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th class="admin-history-col hidden">User ID</th>
+                <th class="admin-history-col hidden">Name</th>
+                <th class="admin-history-col hidden">E-mail</th>
+                <th>File</th>
+                <th class="admin-history-col hidden">Source</th>
+                <th>Confidence</th>
+                <th>Time</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="history-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <div id="history-view-modal" class="editor-modal hidden" role="dialog" aria-modal="true" aria-labelledby="history-view-title">
+      <div class="editor-panel history-view-panel">
+        <div class="editor-head">
+          <h3 id="history-view-title">Detection Record</h3>
+          <button id="history-view-close" type="button" class="btn ghost">Close</button>
+        </div>
+        <div class="history-view-grid">
+          <div class="history-view-row">
+            <span class="history-view-label">File</span>
+            <span id="history-view-file" class="history-view-value">-</span>
+          </div>
+          <div class="history-view-row history-view-admin-only">
+            <span class="history-view-label">User ID</span>
+            <span id="history-view-user-id" class="history-view-value">-</span>
+          </div>
+          <div class="history-view-row history-view-admin-only">
+            <span class="history-view-label">Name</span>
+            <span id="history-view-name" class="history-view-value">-</span>
+          </div>
+          <div class="history-view-row history-view-admin-only">
+            <span class="history-view-label">E-mail</span>
+            <span id="history-view-email" class="history-view-value">-</span>
+          </div>
+          <div class="history-view-row">
+            <span class="history-view-label">Source</span>
+            <span id="history-view-source" class="history-view-value">-</span>
+          </div>
+          <div class="history-view-row">
+            <span class="history-view-label">Confidence</span>
+            <span id="history-view-confidence" class="history-view-value">-</span>
+          </div>
+          <div class="history-view-row">
+            <span class="history-view-label">Time</span>
+            <span id="history-view-time" class="history-view-value">-</span>
+          </div>
+          <div class="history-view-row">
+            <span class="history-view-label">Updated</span>
+            <span id="history-view-updated" class="history-view-value">-</span>
+          </div>
+        </div>
+        <div class="history-view-text-wrap">
+          <p class="history-view-label">Prediction</p>
+          <textarea id="history-view-prediction" readonly></textarea>
+        </div>
+        <div class="history-view-image-wrap">
+          <p class="history-view-label">Uploaded Image</p>
+          <img id="history-view-image" class="hidden" alt="Uploaded handwriting preview" />
+          <p id="history-view-image-note" class="history-view-note">No image preview available.</p>
+        </div>
+      </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='history.js') }}"></script>
+  </body>
+</html>

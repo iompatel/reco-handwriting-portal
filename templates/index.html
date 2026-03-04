@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Handwriting Recognition Portal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <main class="shell">
+      <header class="panel top-nav">
+        <div>
+          <p class="kicker">RNN</p>
+          <h1>Handwriting Recognition Web Portal</h1>
+        </div>
+        <div class="user-strip">
+          <div class="user-meta">
+            <p id="user-name" class="user-name">User</p>
+            <p id="user-role" class="user-role">role</p>
+          </div>
+          <a id="top-history-link" href="/history" class="btn ghost nav-link-btn top-history-link">Detection History</a>
+          <button
+            id="profile-toggle"
+            type="button"
+            class="btn ghost profile-toggle"
+            aria-expanded="false"
+            aria-label="Profile options"
+          >
+            <img id="profile-toggle-avatar" class="profile-toggle-avatar" alt="Profile" />
+          </button>
+          <div id="profile-menu" class="profile-menu hidden" role="dialog" aria-label="User profile">
+            <div class="profile-avatar-wrap">
+              <img id="profile-avatar-preview" class="profile-avatar" alt="Profile image" />
+              <label for="profile-avatar-input" class="btn ghost profile-avatar-btn">Upload Image</label>
+              <input
+                id="profile-avatar-input"
+                class="visually-hidden"
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+              />
+            </div>
+            <div class="profile-row">
+              <span class="profile-label">Name</span>
+              <span id="profile-name" class="profile-value">-</span>
+            </div>
+            <div class="profile-row">
+              <span class="profile-label">Email</span>
+              <span id="profile-email" class="profile-value">-</span>
+            </div>
+            <div class="profile-row">
+              <span class="profile-label">Role</span>
+              <span id="profile-role" class="profile-value">-</span>
+            </div>
+            <button id="profile-logout-btn" type="button" class="btn primary profile-logout">Logout</button>
+          </div>
+        </div>
+      </header>
+
+      <section id="recognition-section" class="grid">
+        <aside class="panel settings">
+          <h2>Image Filters</h2>
+
+          <label class="field split">
+            <span>Grayscale</span>
+            <input id="grayscale" type="checkbox" checked />
+          </label>
+
+          <label class="field split">
+            <span>Denoise</span>
+            <input id="denoise" type="checkbox" checked />
+          </label>
+
+          <label class="field split">
+            <span>Adaptive Threshold</span>
+            <input id="adaptive-threshold" type="checkbox" checked />
+          </label>
+
+          <label class="field split">
+            <span>Invert colors</span>
+            <input id="invert-colors" type="checkbox" />
+          </label>
+
+          <label class="field">
+            <span>Contrast Boost</span>
+            <input id="contrast-boost" type="range" min="1" max="3" step="0.1" value="1.5" />
+            <output id="contrast-boost-value">1.5</output>
+          </label>
+
+          <label class="field split">
+            <span>Handwriting Boost (multi-pass)</span>
+            <input id="handwriting-boost" type="checkbox" checked />
+          </label>
+
+          <label class="field split">
+            <span>Student Notebook Mode</span>
+            <input id="student-notebook-mode" type="checkbox" />
+          </label>
+
+          <label class="field split">
+            <span>Remove Notebook Lines</span>
+            <input id="remove-notebook-lines" type="checkbox" />
+          </label>
+
+          <label class="field split">
+            <span>Smart Text Cleanup</span>
+            <input id="smart-text-cleanup" type="checkbox" checked />
+          </label>
+
+          <label class="field">
+            <span>OCR Engine</span>
+            <select id="ocr-engine">
+              <option value="auto" selected>Auto (Recommended)</option>
+              <option value="hybrid">Hybrid (RNN + OCR)</option>
+              <option value="tesseract">Tesseract Only</option>
+              <option value="rnn">RNN Only</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>OCR Language Codes</span>
+            <input id="ocr-languages" type="text" value="auto" placeholder="auto or eng+hin+spa" />
+            <small id="ocr-languages-help" class="field-help">Loading OCR language support...</small>
+          </label>
+
+          <label class="field">
+            <span>Speech rate</span>
+            <input id="speech-rate" type="range" min="0.6" max="1.4" step="0.05" value="1" />
+            <output id="speech-rate-value">1.0</output>
+          </label>
+        </aside>
+
+        <section class="panel workspace">
+          <h2>Upload Handwriting Images</h2>
+          <div id="drop-zone" class="drop-zone">
+            <input id="image-input" class="visually-hidden" type="file" accept="image/*" multiple />
+            <p>Drag and drop images here</p>
+            <label id="browse-btn" for="image-input" class="btn ghost">Browse Files</label>
+            <small>Supports PNG, JPG, JPEG, BMP, TIF, TIFF</small>
+          </div>
+
+          <div class="toolbar">
+            <p id="file-count">No files selected</p>
+            <div class="toolbar-actions">
+              <button id="clear-btn" type="button" class="btn ghost" disabled>Clear</button>
+              <button id="run-btn" type="button" class="btn primary" disabled>Recognize Text</button>
+            </div>
+          </div>
+
+          <div id="preview-grid" class="preview-grid"></div>
+
+          <div id="status" class="status" aria-live="polite"></div>
+        </section>
+      </section>
+
+      <section id="admin-section" class="panel admin-panel hidden">
+        <div class="admin-hero">
+          <div>
+            <p class="admin-kicker">Control Center</p>
+            <h2>Admin Panel</h2>
+            <p class="admin-subtitle">Manage users, monitor activity, and navigate admin tools quickly.</p>
+          </div>
+          <div class="section-actions">
+            <a href="/history" class="btn ghost nav-link-btn">Detection History</a>
+            <a href="/admin/activity-report" class="btn ghost nav-link-btn">Admin Activity</a>
+            <button id="download-admin-export" type="button" class="btn primary">Download All User Data</button>
+            <button id="refresh-admin" type="button" class="btn ghost">Refresh</button>
+          </div>
+        </div>
+        <p class="admin-note">Simple controls: add users, search users, and manage active records quickly.</p>
+
+        <div class="admin-live-row">
+          <article class="admin-live-card">
+            <p class="admin-live-label">Date & Time</p>
+            <p id="admin-live-datetime" class="admin-live-value">--</p>
+          </article>
+          <article class="admin-live-card">
+            <p class="admin-live-label">Current Location</p>
+            <p id="admin-live-location" class="admin-live-value">Fetching city...</p>
+          </article>
+        </div>
+
+        <div class="stats-row">
+          <article class="stat-card">
+            <p>Active Users</p>
+            <h3 id="stat-active-users">0</h3>
+          </article>
+          <article class="stat-card">
+            <p>Total Users</p>
+            <h3 id="stat-total-users">0</h3>
+          </article>
+          <article class="stat-card">
+            <p>Total Records</p>
+            <h3 id="stat-total-records">0</h3>
+          </article>
+        </div>
+
+        <div class="admin-content-grid">
+          <div class="admin-card admin-user-create-card">
+            <form id="admin-user-form" class="admin-form">
+              <h3>Add User</h3>
+              <input id="admin-full-name" type="text" placeholder="Full name" required />
+              <input id="admin-username" type="text" placeholder="Username" required />
+              <div class="admin-password-wrap">
+                <input id="admin-password" type="password" placeholder="Password" required minlength="6" />
+                <button
+                  id="admin-password-toggle"
+                  type="button"
+                  class="btn ghost admin-pass-toggle"
+                  aria-label="Show or hide add user password"
+                  aria-pressed="false"
+                >
+                  Show
+                </button>
+              </div>
+              <select id="admin-role">
+                <option value="user" selected>User</option>
+                <option value="admin">Admin</option>
+              </select>
+              <button type="submit" class="btn primary">Add User</button>
+            </form>
+          </div>
+          <div class="admin-card admin-users-card">
+            <h3>Users</h3>
+            <div class="admin-users-toolbar">
+              <input id="admin-user-search" type="text" placeholder="Search by name or e-mail" />
+              <select id="admin-user-role-filter">
+                <option value="all" selected>All Roles</option>
+                <option value="admin">Admin</option>
+                <option value="user">User</option>
+              </select>
+              <button id="admin-user-filter-clear" type="button" class="btn ghost">Clear</button>
+              <p id="admin-users-count" class="admin-users-count">0 users</p>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Username</th>
+                    <th>Full Name</th>
+                    <th>Role</th>
+                    <th>Last Login</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="admin-users-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <div id="image-editor-modal" class="editor-modal hidden" role="dialog" aria-modal="true" aria-labelledby="editor-title">
+      <div class="editor-panel">
+        <div class="editor-head">
+          <h3 id="editor-title">Edit Image (Crop & Rotate)</h3>
+          <button id="editor-close" type="button" class="btn ghost">Close</button>
+        </div>
+        <p class="editor-help">Drag on image to select crop area. Use rotate buttons if needed, then Save.</p>
+        <div class="editor-canvas-wrap">
+          <canvas id="editor-canvas"></canvas>
+        </div>
+        <div class="editor-actions">
+          <button id="editor-rotate-left" type="button" class="btn ghost">Rotate Left</button>
+          <button id="editor-rotate-right" type="button" class="btn ghost">Rotate Right</button>
+          <button id="editor-reset-crop" type="button" class="btn ghost">Reset Crop</button>
+          <button id="editor-save" type="button" class="btn primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="global-loader" class="rnn-loader hidden" role="status" aria-live="polite" aria-label="Loading">
+      <div class="rnn-loader-card">
+        <div class="rnn-loader-track" aria-hidden="true">
+          <span class="rnn-loader-letter">R</span>
+          <span class="rnn-loader-letter">N</span>
+          <span class="rnn-loader-letter">N</span>
+        </div>
+        <p id="global-loader-message" class="rnn-loader-message">Loading...</p>
+      </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>

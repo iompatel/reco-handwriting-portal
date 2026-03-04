@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin Activity | Handwriting Recognition Portal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <main class="shell">
+      <header class="panel top-nav">
+        <div>
+          <p class="kicker">RNN</p>
+          <h1>Admin Activity</h1>
+        </div>
+        <div class="user-strip">
+          <div class="user-meta">
+            <p id="user-name" class="user-name">User</p>
+            <p id="user-role" class="user-role">role</p>
+          </div>
+          <a href="/" class="btn ghost nav-link-btn">Admin Panel</a>
+          <a href="/history" class="btn ghost nav-link-btn">Detection History</a>
+          <button
+            id="profile-toggle"
+            type="button"
+            class="btn ghost profile-toggle"
+            aria-expanded="false"
+            aria-label="Profile options"
+          >
+            <img id="profile-toggle-avatar" class="profile-toggle-avatar" alt="Profile" />
+          </button>
+          <div id="profile-menu" class="profile-menu hidden" role="dialog" aria-label="User profile">
+            <div class="profile-avatar-wrap">
+              <img id="profile-avatar-preview" class="profile-avatar" alt="Profile image" />
+              <label for="profile-avatar-input" class="btn ghost profile-avatar-btn">Upload Image</label>
+              <input
+                id="profile-avatar-input"
+                class="visually-hidden"
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+              />
+            </div>
+            <div class="profile-row">
+              <span class="profile-label">Name</span>
+              <span id="profile-name" class="profile-value">-</span>
+            </div>
+            <div class="profile-row">
+              <span class="profile-label">Email</span>
+              <span id="profile-email" class="profile-value">-</span>
+            </div>
+            <div class="profile-row">
+              <span class="profile-label">Role</span>
+              <span id="profile-role" class="profile-value">-</span>
+            </div>
+            <button id="profile-logout-btn" type="button" class="btn primary profile-logout">Logout</button>
+          </div>
+        </div>
+      </header>
+
+      <section class="panel history-panel history-page-panel">
+        <div class="section-head">
+          <h2>View Report</h2>
+          <button id="refresh-activity" type="button" class="btn ghost">Refresh</button>
+        </div>
+        <p class="admin-activity-note">View-only report of admin login times and operations performed.</p>
+        <div class="history-filter-toolbar">
+          <input id="activity-search-input" type="text" placeholder="Search by admin, operation, target or details" />
+          <select id="activity-action-filter">
+            <option value="all" selected>All Operations</option>
+          </select>
+          <button id="activity-filter-clear" type="button" class="btn ghost">Clear</button>
+          <p id="activity-count" class="history-filter-count">0 records</p>
+        </div>
+        <div id="activity-status" class="status" aria-live="polite"></div>
+        <div class="table-wrap">
+          <table class="data-table admin-activity-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Admin</th>
+                <th>Operation</th>
+                <th>Target</th>
+                <th>Details</th>
+                <th>IP</th>
+              </tr>
+            </thead>
+            <tbody id="activity-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='admin_activity.js') }}"></script>
+  </body>
+</html>

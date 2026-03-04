@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Recognition Results | Handwriting Recognition Portal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <main class="shell">
+      <header class="panel top-nav">
+        <div>
+          <p class="kicker">RNN</p>
+          <h1>Recognition Results</h1>
+        </div>
+        <div class="user-strip">
+          <div class="user-meta">
+            <p id="user-name" class="user-name">User</p>
+            <p id="user-role" class="user-role">role</p>
+          </div>
+          <a href="/" class="btn ghost nav-link-btn">Recognize Text</a>
+          <a href="/history" class="btn ghost nav-link-btn">Detection History</a>
+          <button
+            id="profile-toggle"
+            type="button"
+            class="btn ghost profile-toggle"
+            aria-expanded="false"
+            aria-label="Profile options"
+          >
+            <img id="profile-toggle-avatar" class="profile-toggle-avatar" alt="Profile" />
+          </button>
+          <div id="profile-menu" class="profile-menu hidden" role="dialog" aria-label="User profile">
+            <div class="profile-avatar-wrap">
+              <img id="profile-avatar-preview" class="profile-avatar" alt="Profile image" />
+              <label for="profile-avatar-input" class="btn ghost profile-avatar-btn">Upload Image</label>
+              <input
+                id="profile-avatar-input"
+                class="visually-hidden"
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+              />
+            </div>
+            <div class="profile-row">
+              <span class="profile-label">Name</span>
+              <span id="profile-name" class="profile-value">-</span>
+            </div>
+            <div class="profile-row">
+              <span class="profile-label">Email</span>
+              <span id="profile-email" class="profile-value">-</span>
+            </div>
+            <div class="profile-row">
+              <span class="profile-label">Role</span>
+              <span id="profile-role" class="profile-value">-</span>
+            </div>
+            <button id="profile-logout-btn" type="button" class="btn primary profile-logout">Logout</button>
+          </div>
+        </div>
+      </header>
+
+      <section class="panel workspace">
+        <div id="results-status" class="status" aria-live="polite"></div>
+
+        <section class="output-window">
+          <div class="output-head">
+            <h3>Output Window</h3>
+            <button id="copy-output" class="btn ghost" type="button" disabled>Copy Text</button>
+          </div>
+          <textarea
+            id="output-text"
+            readonly
+            placeholder="Recognized handwriting text will appear here..."
+          ></textarea>
+        </section>
+
+        <section id="results" class="results hidden">
+          <div class="results-head">
+            <div>
+              <h3>Recognition Results</h3>
+              <p id="summary"></p>
+            </div>
+            <div class="results-actions">
+              <button id="speak-all" class="btn ghost" type="button">Speak All</button>
+              <button id="stop-speech" class="btn ghost" type="button">Stop</button>
+            </div>
+          </div>
+          <div id="results-list" class="results-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='results.js') }}"></script>
+  </body>
+</html>

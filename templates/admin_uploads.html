@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin Uploads | Handwriting Recognition Portal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <main class="shell">
+      <header class="panel top-nav">
+        <div>
+          <p class="kicker">RNN</p>
+          <h1>Admin Uploads</h1>
+        </div>
+        <div class="user-strip">
+          <div class="user-meta">
+            <p id="user-name" class="user-name">User</p>
+            <p id="user-role" class="user-role">role</p>
+          </div>
+          <a href="/" class="btn ghost nav-link-btn">Admin Panel</a>
+          <a href="/history" class="btn ghost nav-link-btn">Detection History</a>
+          <button
+            id="profile-toggle"
+            type="button"
+            class="btn ghost profile-toggle"
+            aria-expanded="false"
+            aria-label="Profile options"
+          >
+            <img id="profile-toggle-avatar" class="profile-toggle-avatar" alt="Profile" />
+          </button>
+          <div id="profile-menu" class="profile-menu hidden" role="dialog" aria-label="User profile">
+            <div class="profile-avatar-wrap">
+              <img id="profile-avatar-preview" class="profile-avatar" alt="Profile image" />
+              <label for="profile-avatar-input" class="btn ghost profile-avatar-btn">Upload Image</label>
+              <input
+                id="profile-avatar-input"
+                class="visually-hidden"
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+              />
+            </div>
+            <div class="profile-row">
+              <span class="profile-label">Name</span>
+              <span id="profile-name" class="profile-value">-</span>
+            </div>
+            <div class="profile-row">
+              <span class="profile-label">Email</span>
+              <span id="profile-email" class="profile-value">-</span>
+            </div>
+            <div class="profile-row">
+              <span class="profile-label">Role</span>
+              <span id="profile-role" class="profile-value">-</span>
+            </div>
+            <button id="profile-logout-btn" type="button" class="btn primary profile-logout">Logout</button>
+          </div>
+        </div>
+      </header>
+
+      <section class="panel history-panel history-page-panel">
+        <div class="section-head">
+          <h2>All Uploads</h2>
+          <button id="refresh-uploads" type="button" class="btn ghost">Refresh</button>
+        </div>
+        <div id="uploads-status" class="status" aria-live="polite"></div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>File</th>
+                <th>Confidence</th>
+                <th>Source</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody id="uploads-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='admin_uploads.js') }}"></script>
+  </body>
+</html>

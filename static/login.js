@@ -1,0 +1,192 @@
+const refs = {
+  status: document.getElementById("auth-status"),
+  loader: document.getElementById("global-loader"),
+  loaderMessage: document.getElementById("global-loader-message"),
+  loginForm: document.getElementById("login-form"),
+  loginUsername: document.getElementById("login-username"),
+  loginPassword: document.getElementById("login-password"),
+  registerForm: document.getElementById("register-form"),
+  regFullName: document.getElementById("reg-full-name"),
+  regUsername: document.getElementById("reg-username"),
+  regPassword: document.getElementById("reg-password"),
+  regConfirm: document.getElementById("reg-confirm"),
+  resetForm: document.getElementById("reset-form"),
+  resetUsername: document.getElementById("reset-username"),
+  resetNewPassword: document.getElementById("reset-new-password"),
+  resetConfirm: document.getElementById("reset-confirm"),
+  showRegister: document.getElementById("show-register"),
+  showReset: document.getElementById("show-reset"),
+  showLoginFromRegister: document.getElementById("show-login-from-register"),
+  showLoginFromReset: document.getElementById("show-login-from-reset"),
+  showRegisterFromReset: document.getElementById("show-register-from-reset"),
+};
+
+let loaderCount = 0;
+
+function setStatus(message, type = "") {
+  refs.status.textContent = message;
+  refs.status.className = `status ${type}`.trim();
+}
+
+function showLoader(message = "Loading...") {
+  if (!refs.loader) return;
+  loaderCount += 1;
+  if (refs.loaderMessage) refs.loaderMessage.textContent = message;
+  refs.loader.classList.remove("hidden");
+}
+
+function hideLoader() {
+  if (!refs.loader) return;
+  loaderCount = Math.max(0, loaderCount - 1);
+  if (loaderCount === 0) {
+    refs.loader.classList.add("hidden");
+    if (refs.loaderMessage) refs.loaderMessage.textContent = "Loading...";
+  }
+}
+
+async function apiFetch(url, payload) {
+  showLoader("RNN loading...");
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    let data = {};
+    try {
+      data = await response.json();
+    } catch {
+      data = {};
+    }
+
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "Request failed");
+    }
+
+    return data;
+  } finally {
+    hideLoader();
+  }
+}
+
+function showAuthForm(view) {
+  const forms = {
+    login: refs.loginForm,
+    register: refs.registerForm,
+    reset: refs.resetForm,
+  };
+  Object.entries(forms).forEach(([name, form]) => {
+    if (!form) return;
+    form.classList.toggle("is-hidden", name !== view);
+  });
+}
+
+function initPasswordToggles() {
+  const toggleButtons = document.querySelectorAll("[data-toggle-password]");
+  toggleButtons.forEach((button) => {
+    const targetId = button.getAttribute("data-target");
+    const input = document.getElementById(targetId || "");
+    if (!input) return;
+
+    button.addEventListener("click", () => {
+      const makeVisible = input.type === "password";
+      input.type = makeVisible ? "text" : "password";
+      button.textContent = makeVisible ? "Hide" : "Show";
+      button.setAttribute("aria-pressed", makeVisible ? "true" : "false");
+    });
+  });
+}
+
+refs.showRegister?.addEventListener("click", () => {
+  showAuthForm("register");
+  setStatus("");
+});
+
+refs.showReset?.addEventListener("click", () => {
+  showAuthForm("reset");
+  setStatus("");
+});
+
+refs.showLoginFromRegister?.addEventListener("click", () => {
+  showAuthForm("login");
+  setStatus("");
+});
+
+refs.showLoginFromReset?.addEventListener("click", () => {
+  showAuthForm("login");
+  setStatus("");
+});
+
+refs.showRegisterFromReset?.addEventListener("click", () => {
+  showAuthForm("register");
+  setStatus("");
+});
+
+refs.loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setStatus("Logging in...");
+  try {
+    await apiFetch("/api/auth/login", {
+      username: refs.loginUsername.value,
+      password: refs.loginPassword.value,
+    });
+    window.location.href = "/";
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+});
+
+refs.registerForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (refs.regPassword.value !== refs.regConfirm.value) {
+    setStatus("Passwords do not match.", "error");
+    return;
+  }
+
+  setStatus("Creating account...");
+  try {
+    await apiFetch("/api/auth/register", {
+      full_name: refs.regFullName.value,
+      username: refs.regUsername.value,
+      password: refs.regPassword.value,
+    });
+
+    refs.loginUsername.value = refs.regUsername.value;
+    refs.loginPassword.value = "";
+    refs.registerForm.reset();
+    showAuthForm("login");
+    setStatus("Account created. Please login.", "success");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+});
+
+refs.resetForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (refs.resetNewPassword.value !== refs.resetConfirm.value) {
+    setStatus("Reset passwords do not match.", "error");
+    return;
+  }
+
+  setStatus("Resetting password...");
+  try {
+    await apiFetch("/api/auth/reset-password", {
+      username: refs.resetUsername.value,
+      new_password: refs.resetNewPassword.value,
+    });
+
+    refs.loginUsername.value = refs.resetUsername.value;
+    refs.loginPassword.value = "";
+    refs.resetForm.reset();
+    showAuthForm("login");
+    setStatus("Password reset successful. Please login.", "success");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+});
+
+showAuthForm("login");
+initPasswordToggles();
