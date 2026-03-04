@@ -1,0 +1,15 @@
+.git
+.venv
+.venv*
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+
+data
+checkpoints
+output
+tmp
+outputs*
+
