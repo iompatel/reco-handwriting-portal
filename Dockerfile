@@ -13,8 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.10.0 torchvision==0.25.0 \
-    && pip install --no-cache-dir -r requirements.txt
+RUN grep -vE '^(torch|torchvision)' requirements.txt > /tmp/requirements.deploy.txt \
+    && pip install --no-cache-dir -r /tmp/requirements.deploy.txt
 
 COPY . .
 
