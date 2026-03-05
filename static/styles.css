@@ -30,6 +30,12 @@ body.modal-open {
   overflow: hidden;
 }
 
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 .backdrop {
   position: fixed;
   inset: 0;
@@ -322,6 +328,13 @@ h1 {
   display: grid;
   grid-template-columns: 310px 1fr;
   gap: 16px;
+}
+
+.grid > *,
+.admin-content-grid > *,
+.stats-row > *,
+.admin-live-row > * {
+  min-width: 0;
 }
 
 .panel {
@@ -872,6 +885,8 @@ output {
 }
 
 .table-wrap {
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
 }
 
@@ -1621,6 +1636,11 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 
+  .table-wrap {
+    width: 100%;
+    max-width: 100%;
+  }
+
   .history-filter-count,
   .admin-users-count {
     justify-self: start;
@@ -1676,6 +1696,18 @@ textarea:focus {
 
   .profile-menu {
     width: min(94vw, 340px);
+  }
+
+  .section-actions .btn,
+  .toolbar-actions .btn,
+  .results-actions .btn,
+  .admin-users-toolbar .btn {
+    width: 100%;
+    text-align: center;
+  }
+
+  .admin-pass-toggle {
+    width: auto;
   }
 
   .preview-grid {
