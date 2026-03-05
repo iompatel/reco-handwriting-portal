@@ -19,8 +19,14 @@ const refs = {
   showLoginFromRegister: document.getElementById("show-login-from-register"),
   showLoginFromReset: document.getElementById("show-login-from-reset"),
   showRegisterFromReset: document.getElementById("show-register-from-reset"),
+  googleLoginButton: document.getElementById("google-login-button"),
 };
 
+const firebaseWebConfig = window.firebaseWebConfig || {};
+const firebaseGoogleEnabled = Boolean(window.firebaseGoogleEnabled);
+
+let firebaseAuthClient = null;
+let firebaseModules = null;
 let loaderCount = 0;
 
 function setStatus(message, type = "") {
@@ -98,6 +104,100 @@ function initPasswordToggles() {
   });
 }
 
+function hasFirebaseWebConfig() {
+  const requiredKeys = ["apiKey", "authDomain", "projectId", "appId"];
+  return requiredKeys.every((key) => typeof firebaseWebConfig[key] === "string" && firebaseWebConfig[key].trim());
+}
+
+async function loadFirebaseModules() {
+  if (firebaseModules) {
+    return firebaseModules;
+  }
+
+  const [firebaseAppModule, firebaseAuthModule] = await Promise.all([
+    import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"),
+    import("https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js"),
+  ]);
+
+  firebaseModules = {
+    initializeApp: firebaseAppModule.initializeApp,
+    getAuth: firebaseAuthModule.getAuth,
+    GoogleAuthProvider: firebaseAuthModule.GoogleAuthProvider,
+    signInWithPopup: firebaseAuthModule.signInWithPopup,
+  };
+  return firebaseModules;
+}
+
+async function getFirebaseAuthClient() {
+  if (!firebaseGoogleEnabled || !hasFirebaseWebConfig()) {
+    throw new Error("Google login is not configured. Contact admin.");
+  }
+  if (!firebaseAuthClient) {
+    const firebase = await loadFirebaseModules();
+    const firebaseApp = firebase.initializeApp(firebaseWebConfig);
+    firebaseAuthClient = firebase.getAuth(firebaseApp);
+  }
+  return firebaseAuthClient;
+}
+
+function googleLoginErrorMessage(error) {
+  const code = typeof error?.code === "string" ? error.code : "";
+  if (code.endsWith("popup-closed-by-user")) {
+    return "Google popup closed before sign-in completed.";
+  }
+  if (code.endsWith("popup-blocked")) {
+    return "Popup blocked. Please allow popups and try again.";
+  }
+  if (code.endsWith("unauthorized-domain")) {
+    const currentHost = window.location.hostname || "this host";
+    if (currentHost === "127.0.0.1" || currentHost === "0.0.0.0") {
+      return `Firebase blocked ${currentHost}. Open this app on localhost or add ${currentHost} in Firebase Authorized domains.`;
+    }
+    return `This domain (${currentHost}) is not authorized in Firebase settings.`;
+  }
+  if (typeof error?.message === "string" && error.message.trim()) {
+    return error.message;
+  }
+  return "Google login failed. Please try again.";
+}
+
+function maybeRedirectForFirebaseLocalhost() {
+  const localBlockedHosts = new Set(["127.0.0.1", "0.0.0.0"]);
+  const currentHost = window.location.hostname || "";
+  if (!localBlockedHosts.has(currentHost)) {
+    return false;
+  }
+
+  const port = window.location.port ? `:${window.location.port}` : "";
+  const redirectUrl = `${window.location.protocol}//localhost${port}${window.location.pathname}${window.location.search}${window.location.hash}`;
+  setStatus("Redirecting to localhost for Google sign-in...");
+  window.location.replace(redirectUrl);
+  return true;
+}
+
+async function handleGoogleLogin() {
+  if (maybeRedirectForFirebaseLocalhost()) {
+    return;
+  }
+
+  setStatus("Opening Google sign-in...");
+  try {
+    const firebase = await loadFirebaseModules();
+    const authClient = await getFirebaseAuthClient();
+    const provider = new firebase.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+
+    const result = await firebase.signInWithPopup(authClient, provider);
+    const idToken = await result.user.getIdToken();
+
+    setStatus("Signing in with Google...");
+    await apiFetch("/api/auth/firebase-login", { id_token: idToken });
+    window.location.href = "/";
+  } catch (error) {
+    setStatus(googleLoginErrorMessage(error), "error");
+  }
+}
+
 refs.showRegister?.addEventListener("click", () => {
   showAuthForm("register");
   setStatus("");
@@ -122,6 +222,8 @@ refs.showRegisterFromReset?.addEventListener("click", () => {
   showAuthForm("register");
   setStatus("");
 });
+
+refs.googleLoginButton?.addEventListener("click", handleGoogleLogin);
 
 refs.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();

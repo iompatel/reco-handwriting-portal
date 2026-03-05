@@ -5,16 +5,36 @@ services:
     plan: free
     autoDeploy: true
     healthCheckPath: /api/health
-    disk:
-      name: reco-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: FLASK_SECRET_KEY
         generateValue: true
       - key: OCR_DEVICE
         value: cpu
       - key: OCR_DB_PATH
-        value: /var/data/app.db
+        value: /tmp/app.db
       - key: OCR_UPLOAD_DIR
-        value: /var/data/uploads
+        value: /tmp/uploads
+      - key: FIREBASE_DATA_SYNC_ENABLED
+        value: "true"
+      - key: FIREBASE_SYNC_ON_STARTUP
+        value: "true"
+      - key: FIREBASE_RESTORE_ON_STARTUP
+        value: "true"
+      - key: FIREBASE_SYNC_RETRY_SECONDS
+        value: "300"
+      - key: FIREBASE_DATA_COLLECTION_PREFIX
+        value: reco_prod
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: FIREBASE_WEB_API_KEY
+        sync: false
+      - key: FIREBASE_WEB_AUTH_DOMAIN
+        sync: false
+      - key: FIREBASE_WEB_PROJECT_ID
+        sync: false
+      - key: FIREBASE_WEB_APP_ID
+        sync: false
+      - key: FIREBASE_WEB_STORAGE_BUCKET
+        sync: false
+      - key: FIREBASE_WEB_MESSAGING_SENDER_ID
+        sync: false

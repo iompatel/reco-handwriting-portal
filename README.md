@@ -56,7 +56,11 @@ pip install -r requirements.txt
 
 3. Open:
 
-- `http://127.0.0.1:5000/login`
+- `http://localhost:5000/login`
+
+Note for Google/Firebase login:
+- Prefer `localhost` URL.
+- If you use `127.0.0.1`, add it in Firebase `Authentication -> Settings -> Authorized domains`.
 
 ## Multilingual Setup (Important)
 
@@ -89,6 +93,109 @@ On first run, database auto-creates:
 
 - Username: `admin`
 - Password: `admin123`
+
+## Google Login (Firebase Auth)
+
+This project now supports **Continue with Google** on the login page.
+
+1. In Firebase Console:
+- Enable **Authentication -> Sign-in method -> Google**.
+- Add your local/prod domain in **Authentication -> Settings -> Authorized domains**.
+
+2. Export Firebase web SDK keys (for frontend):
+
+```bash
+export FIREBASE_WEB_API_KEY="..."
+export FIREBASE_WEB_AUTH_DOMAIN="your-project.firebaseapp.com"
+export FIREBASE_WEB_PROJECT_ID="your-project-id"
+export FIREBASE_WEB_APP_ID="..."
+```
+
+Optional keys:
+- `FIREBASE_WEB_STORAGE_BUCKET`
+- `FIREBASE_WEB_MESSAGING_SENDER_ID`
+
+3. Export Firebase Admin credentials (for backend ID token verify):
+
+Use either JSON string:
+
+```bash
+export FIREBASE_SERVICE_ACCOUNT_JSON='{"type":"service_account","project_id":"...","private_key_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n","client_email":"...","client_id":"...","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token"}'
+```
+
+or JSON file path:
+
+```bash
+export FIREBASE_SERVICE_ACCOUNT_PATH="/absolute/path/to/service-account.json"
+```
+
+If any required Firebase setting is missing, normal username/password login still works and Google button stays disabled.
+
+## Firebase Data Sync (SQLite -> Firestore)
+
+All app tables can be mirrored to Firebase Firestore:
+- `users`
+- `user_sessions`
+- `detection_history`
+- `admin_activity_logs`
+
+Enable with environment variables:
+
+```bash
+export FIREBASE_DATA_SYNC_ENABLED="true"
+export FIREBASE_SYNC_ON_STARTUP="true"
+export FIREBASE_RESTORE_ON_STARTUP="true"
+export FIREBASE_SYNC_RETRY_SECONDS="300"
+export FIREBASE_DATA_COLLECTION_PREFIX="reco_prod"
+```
+
+Before enabling sync in production, Firebase Console me ye ensure karo:
+- `Build -> Firestore Database` created (Native mode)
+- Google Cloud me `Cloud Firestore API` enabled for your project
+
+How it works:
+- Every write/commit in app syncs updated tables to Firestore.
+- On server startup, a full sync runs once (when `FIREBASE_SYNC_ON_STARTUP=true`).
+- On server startup, optional restore from Firestore to local SQLite runs when `FIREBASE_RESTORE_ON_STARTUP=true`.
+- If Firebase temporarily fails, sync auto-retries (interval from `FIREBASE_SYNC_RETRY_SECONDS`).
+- Admin can trigger manual full sync:
+  - `POST /api/admin/firebase-sync`
+
+Firestore collection naming:
+- `<prefix>_users`
+- `<prefix>_user_sessions`
+- `<prefix>_detection_history`
+- `<prefix>_admin_activity_logs`
+
+## Deploy Live (Render + Firebase)
+
+This repo already contains `render.yaml` with disk + Firebase env placeholders.
+
+1. Push this project to GitHub.
+2. In Render Dashboard, choose **New -> Blueprint** and connect the repo.
+3. While creating service, set these required env vars:
+   - `FIREBASE_SERVICE_ACCOUNT_JSON` (full service-account JSON string)
+   - `FIREBASE_WEB_API_KEY`
+   - `FIREBASE_WEB_AUTH_DOMAIN`
+   - `FIREBASE_WEB_PROJECT_ID`
+   - `FIREBASE_WEB_APP_ID`
+4. Firebase side checks:
+   - Firestore Database created (Native mode)
+   - Cloud Firestore API enabled
+5. Keep these enabled:
+   - `FIREBASE_DATA_SYNC_ENABLED=true`
+   - `FIREBASE_SYNC_ON_STARTUP=true`
+   - `FIREBASE_RESTORE_ON_STARTUP=true`
+   - `FIREBASE_SYNC_RETRY_SECONDS=300`
+6. Deploy.
+7. After deploy, run one manual full sync once:
+   - Login as admin
+   - `POST /api/admin/firebase-sync`
+8. Verify:
+   - `GET /api/health` should show:
+     - `"firebase_google_enabled": true`
+     - `"firebase_data_sync_configured": true`
+     - `"firebase_data_sync_enabled": true`
 
 ## High-Accuracy Training (Public + Local + History)
 
@@ -143,6 +250,7 @@ OCR_CHECKPOINT=checkpoints/robust/best.pt ./run_portal.sh
 
 ## Troubleshooting
 
-- If site does not open, confirm server log shows `Running on http://127.0.0.1:5000`.
+- If site does not open, confirm server log shows `Running on http://localhost:5000`.
+- For local run, open `http://localhost:5000/login` first when testing Firebase Google login.
 - If prediction fails with `No module named 'torch'`, run using `.venv313` and reinstall requirements.
 - If checkpoint is missing, train first or use existing `checkpoints/fix2/best.pt`.

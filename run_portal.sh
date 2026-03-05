@@ -13,7 +13,7 @@ else
   PY_BIN="python3"
 fi
 
-HOST="${HOST:-127.0.0.1}"
+HOST="${HOST:-localhost}"
 PORT="${PORT:-5000}"
 DB_PATH="${OCR_DB_PATH:-data/app.db}"
 CHECKPOINT="${OCR_CHECKPOINT:-checkpoints/fix2/best.pt}"

@@ -5,6 +5,7 @@ import csv
 import io
 import json
 import os
+import secrets
 import sqlite3
 import zipfile
 from dataclasses import asdict
@@ -19,6 +20,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
 from src.database import connect_db, init_db
+from src.firebase_sync import FIREBASE_SYNC_TABLES, FirebaseDataSync
 from src.inference_service import InferenceService, PreprocessConfig
 
 try:
@@ -32,6 +34,18 @@ try:
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
+
+try:
+    import firebase_admin
+    from firebase_admin import auth as firebase_auth
+    from firebase_admin import credentials as firebase_credentials
+
+    FIREBASE_ADMIN_AVAILABLE = True
+except ImportError:
+    firebase_admin = None
+    firebase_auth = None
+    firebase_credentials = None
+    FIREBASE_ADMIN_AVAILABLE = False
 
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 ALLOWED_AVATAR_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
@@ -105,11 +119,91 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         relative = target.relative_to(upload_root).as_posix()
         return relative
 
+    def firebase_web_config_from_env() -> dict[str, str]:
+        config = {
+            "apiKey": (os.getenv("FIREBASE_WEB_API_KEY") or "").strip(),
+            "authDomain": (os.getenv("FIREBASE_WEB_AUTH_DOMAIN") or "").strip(),
+            "projectId": (os.getenv("FIREBASE_WEB_PROJECT_ID") or "").strip(),
+            "appId": (os.getenv("FIREBASE_WEB_APP_ID") or "").strip(),
+            "storageBucket": (os.getenv("FIREBASE_WEB_STORAGE_BUCKET") or "").strip(),
+            "messagingSenderId": (os.getenv("FIREBASE_WEB_MESSAGING_SENDER_ID") or "").strip(),
+        }
+        required = ("apiKey", "authDomain", "projectId", "appId")
+        if any(not config[key] for key in required):
+            return {}
+        return {key: value for key, value in config.items() if value}
+
+    def init_firebase_admin_sdk() -> bool:
+        if not FIREBASE_ADMIN_AVAILABLE:
+            app.logger.warning("firebase-admin is not installed; Google sign-in is disabled.")
+            return False
+
+        assert firebase_admin is not None
+        assert firebase_credentials is not None
+
+        try:
+            firebase_admin.get_app()
+            return True
+        except ValueError:
+            pass
+
+        service_account_json = (os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON") or "").strip()
+        service_account_path = (os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH") or "").strip()
+
+        try:
+            if service_account_json:
+                parsed_service_account = json.loads(service_account_json)
+                cred = firebase_credentials.Certificate(parsed_service_account)
+            elif service_account_path:
+                cred = firebase_credentials.Certificate(service_account_path)
+            else:
+                app.logger.warning(
+                    "Firebase credentials missing. Set FIREBASE_SERVICE_ACCOUNT_JSON or FIREBASE_SERVICE_ACCOUNT_PATH."
+                )
+                return False
+
+            firebase_admin.initialize_app(cred)
+            return True
+        except Exception:
+            app.logger.exception("Failed to initialize Firebase Admin SDK")
+            return False
+
+    firebase_web_config = firebase_web_config_from_env()
+    firebase_admin_ready = init_firebase_admin_sdk()
+    firebase_google_enabled = bool(firebase_web_config) and firebase_admin_ready
+    firebase_data_sync = FirebaseDataSync(
+        enabled=firebase_admin_ready and parse_bool(os.getenv("FIREBASE_DATA_SYNC_ENABLED"), default=True),
+        logger=app.logger,
+        collection_prefix=(os.getenv("FIREBASE_DATA_COLLECTION_PREFIX") or "reco"),
+        retry_interval_seconds=clamp_int(
+            os.getenv("FIREBASE_SYNC_RETRY_SECONDS"),
+            default=300,
+            min_value=30,
+            max_value=3600,
+        ),
+    )
+
     @app.teardown_appcontext
     def close_db(_: object | None = None) -> None:
         db = g.pop("db", None)
         if db is not None:
             db.close()
+
+    def commit_and_sync(*tables: str, min_interval_seconds: int = 0, force: bool = False) -> None:
+        db = get_db()
+        db.commit()
+        if not firebase_data_sync.enabled:
+            return
+        target_tables = tables if tables else FIREBASE_SYNC_TABLES
+        try:
+            firebase_data_sync.sync_tables(
+                db,
+                target_tables,
+                min_interval_seconds=min_interval_seconds,
+                force=force,
+            )
+        except Exception:
+            app.logger.exception("Failed to sync SQLite data to Firebase")
 
     def session_user() -> sqlite3.Row | None:
         if "user_id" not in session:
@@ -215,9 +309,70 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 details=details,
             )
             if commit:
-                get_db().commit()
+                commit_and_sync("admin_activity_logs")
         except Exception:
             app.logger.exception("Failed to write admin activity log")
+
+    def user_payload(user: sqlite3.Row) -> dict[str, object]:
+        return {
+            "id": int(user["id"]),
+            "username": user["username"],
+            "full_name": user["full_name"],
+            "role": user["role"],
+            "avatar_url": build_avatar_url(user["avatar_path"]),
+        }
+
+    def begin_authenticated_session(user: sqlite3.Row) -> None:
+        db = get_db()
+        session.clear()
+        db.execute(
+            "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?",
+            (int(user["id"]),),
+        )
+        cur = db.execute(
+            "INSERT INTO user_sessions (user_id, is_active) VALUES (?, 1)",
+            (int(user["id"]),),
+        )
+        if user["role"] == "admin":
+            insert_admin_activity(
+                admin_user_id=int(user["id"]),
+                action="LOGIN",
+                target_type="auth",
+                target_id=str(int(user["id"])),
+                details="Admin logged in successfully",
+            )
+        commit_and_sync("users", "user_sessions", "admin_activity_logs")
+
+        session["user_id"] = int(user["id"])
+        session["role"] = user["role"]
+        session["session_record_id"] = int(cur.lastrowid)
+        g.pop("session_user", None)
+
+    def login_template_context(login_only: bool) -> dict[str, object]:
+        return {
+            "login_only": login_only,
+            "firebase_web_config": firebase_web_config,
+            "firebase_google_enabled": firebase_google_enabled,
+        }
+
+    if firebase_data_sync.enabled and (
+        parse_bool(os.getenv("FIREBASE_RESTORE_ON_STARTUP"), default=False)
+        or parse_bool(os.getenv("FIREBASE_SYNC_ON_STARTUP"), default=True)
+    ):
+        bootstrap_db: sqlite3.Connection | None = None
+        try:
+            bootstrap_db = connect_db(app.config["DB_PATH"])
+            if parse_bool(os.getenv("FIREBASE_RESTORE_ON_STARTUP"), default=False):
+                restored_counts = firebase_data_sync.restore_all_to_sqlite(bootstrap_db)
+                if restored_counts:
+                    app.logger.info("Restored SQLite from Firebase: %s", restored_counts)
+            if firebase_data_sync.enabled and parse_bool(os.getenv("FIREBASE_SYNC_ON_STARTUP"), default=True):
+                firebase_data_sync.sync_all(bootstrap_db, force=True)
+        except Exception:
+            app.logger.exception("Initial Firebase sync failed")
+        finally:
+            if bootstrap_db is not None:
+                bootstrap_db.close()
 
     @app.before_request
     def touch_active_session() -> None:
@@ -235,13 +390,19 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 """,
                 (session_record_id,),
             )
-            db.commit()
+            commit_and_sync("user_sessions", min_interval_seconds=60)
 
     @app.get("/login")
     def login_page():
         if session_user() is not None:
             return redirect(url_for("index"))
-        return render_template("login.html")
+        return render_template("login.html", **login_template_context(login_only=False))
+
+    @app.get("/login/form")
+    def login_form_page():
+        if session_user() is not None:
+            return redirect(url_for("index"))
+        return render_template("login.html", **login_template_context(login_only=True))
 
     @app.get("/favicon.ico")
     def favicon():
@@ -303,7 +464,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 """,
                 (username, full_name, generate_password_hash(password)),
             )
-            db.commit()
+            commit_and_sync("users")
         except sqlite3.IntegrityError:
             return jsonify({"ok": False, "error": "Username already exists"}), 400
 
@@ -332,7 +493,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             "UPDATE users SET password_hash = ? WHERE id = ?",
             (generate_password_hash(new_password), int(user["id"])),
         )
-        db.commit()
+        commit_and_sync("users")
         return jsonify({"ok": True, "message": "Password updated successfully"})
 
     @app.post("/api/auth/login")
@@ -350,40 +511,87 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         if user is None or not check_password_hash(user["password_hash"], password):
             return jsonify({"ok": False, "error": "Invalid username or password"}), 401
 
-        session.clear()
-
-        db.execute(
-            "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?",
-            (user["id"],),
-        )
-        cur = db.execute(
-            "INSERT INTO user_sessions (user_id, is_active) VALUES (?, 1)",
-            (user["id"],),
-        )
-        if user["role"] == "admin":
-            insert_admin_activity(
-                admin_user_id=int(user["id"]),
-                action="LOGIN",
-                target_type="auth",
-                target_id=str(int(user["id"])),
-                details="Admin logged in successfully",
-            )
-        db.commit()
-
-        session["user_id"] = int(user["id"])
-        session["role"] = user["role"]
-        session["session_record_id"] = int(cur.lastrowid)
+        begin_authenticated_session(user)
 
         return jsonify(
             {
                 "ok": True,
-                "user": {
-                    "id": int(user["id"]),
-                    "username": user["username"],
-                    "full_name": user["full_name"],
-                    "role": user["role"],
-                    "avatar_url": build_avatar_url(user["avatar_path"]),
-                },
+                "user": user_payload(user),
+            }
+        )
+
+    @app.post("/api/auth/firebase-login")
+    def firebase_login():
+        if not firebase_google_enabled:
+            return jsonify({"ok": False, "error": "Google login is not configured on this server"}), 503
+        if firebase_auth is None:
+            return jsonify({"ok": False, "error": "Firebase authentication dependency is missing"}), 503
+
+        payload = request.get_json(silent=True) or {}
+        id_token = (payload.get("id_token") or "").strip()
+        if not id_token:
+            return jsonify({"ok": False, "error": "Missing Firebase ID token"}), 400
+
+        try:
+            decoded_token = firebase_auth.verify_id_token(id_token)
+        except Exception as exc:
+            app.logger.warning("Firebase ID token verification failed: %s", exc)
+            return jsonify({"ok": False, "error": "Google authentication failed"}), 401
+
+        username = normalize_username(decoded_token.get("email", ""))
+        if not username:
+            return jsonify({"ok": False, "error": "Google account email not available"}), 400
+        if not decoded_token.get("email_verified", False):
+            return jsonify({"ok": False, "error": "Please verify your Google account email first"}), 403
+
+        full_name = (decoded_token.get("name") or "").strip() or username.split("@", 1)[0]
+        firebase_uid = (decoded_token.get("uid") or "").strip()
+
+        db = get_db()
+        user = db.execute(
+            "SELECT id, username, full_name, role, avatar_path FROM users WHERE username = ?",
+            (username,),
+        ).fetchone()
+
+        if user is None:
+            password_seed = f"firebase::{firebase_uid}::{secrets.token_urlsafe(18)}"
+            try:
+                cur = db.execute(
+                    """
+                    INSERT INTO users (username, full_name, password_hash, role)
+                    VALUES (?, ?, ?, 'user')
+                    """,
+                    (username, full_name, generate_password_hash(password_seed)),
+                )
+                user = db.execute(
+                    "SELECT id, username, full_name, role, avatar_path FROM users WHERE id = ?",
+                    (int(cur.lastrowid),),
+                ).fetchone()
+            except sqlite3.IntegrityError:
+                user = db.execute(
+                    "SELECT id, username, full_name, role, avatar_path FROM users WHERE username = ?",
+                    (username,),
+                ).fetchone()
+
+        if user is None:
+            return jsonify({"ok": False, "error": "Unable to complete Google login"}), 500
+
+        if full_name and user["full_name"] != full_name:
+            db.execute(
+                "UPDATE users SET full_name = ? WHERE id = ?",
+                (full_name, int(user["id"])),
+            )
+            user = db.execute(
+                "SELECT id, username, full_name, role, avatar_path FROM users WHERE id = ?",
+                (int(user["id"]),),
+            ).fetchone()
+
+        begin_authenticated_session(user)
+
+        return jsonify(
+            {
+                "ok": True,
+                "user": user_payload(user),
             }
         )
 
@@ -416,7 +624,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             )
 
         if db is not None:
-            db.commit()
+            commit_and_sync("user_sessions", "admin_activity_logs")
 
         session.clear()
         return jsonify({"ok": True})
@@ -511,7 +719,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             "UPDATE users SET avatar_path = ? WHERE id = ?",
             (relative_path, int(user["id"])),
         )
-        db.commit()
+        commit_and_sync("users")
         g.pop("session_user", None)
 
         if old_avatar:
@@ -534,6 +742,10 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
     def health():
         status = service.get_status()
         status["ok"] = True
+        status["firebase_google_enabled"] = firebase_google_enabled
+        status["firebase_data_sync_configured"] = firebase_data_sync.configured
+        status["firebase_data_sync_enabled"] = firebase_data_sync.enabled
+        status["firebase_data_sync_last_error"] = firebase_data_sync.last_error_reason
         return jsonify(status)
 
     @app.get("/api/ocr/capabilities")
@@ -655,7 +867,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                     stored_image_paths[pred_index] if pred_index < len(stored_image_paths) else "",
                 ),
             )
-        db.commit()
+        commit_and_sync("detection_history")
 
         avg_conf = sum(item["confidence"] for item in predictions) / max(1, len(predictions))
         warnings = sorted(
@@ -1181,7 +1393,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 target_id=str(record_id),
                 details=f"Updated history record {record_id}; fields: {', '.join(changed_fields)}",
             )
-        db.commit()
+        commit_and_sync("detection_history", "admin_activity_logs")
 
         updated = db.execute(
             """
@@ -1221,7 +1433,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 target_id=str(record_id),
                 details=f"Deleted history record {record_id}",
             )
-        db.commit()
+        commit_and_sync("detection_history", "admin_activity_logs")
         return jsonify({"ok": True})
 
     @app.get("/api/admin/users")
@@ -1236,6 +1448,36 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             """
         ).fetchall()
         return jsonify({"ok": True, "users": [dict(row) for row in rows]})
+
+    @app.post("/api/admin/firebase-sync")
+    @admin_required_api
+    def admin_firebase_sync():
+        if not firebase_data_sync.configured:
+            return jsonify({"ok": False, "error": "Firebase data sync is disabled on this server"}), 503
+
+        db = get_db()
+        try:
+            synced_tables = firebase_data_sync.sync_all(db, force=True)
+        except Exception:
+            app.logger.exception("Manual Firebase sync failed")
+            return jsonify({"ok": False, "error": "Firebase sync failed"}), 500
+
+        if not synced_tables and not firebase_data_sync.enabled:
+            reason = firebase_data_sync.last_error_reason or "unknown Firebase sync failure"
+            return jsonify({"ok": False, "error": f"Firebase sync failed: {reason}"}), 500
+
+        current_admin = session_user()
+        if current_admin is not None and current_admin["role"] == "admin":
+            log_admin_activity(
+                "FIREBASE_SYNC",
+                target_type="system",
+                target_id="firebase",
+                details=f"Manual Firebase sync completed for tables: {', '.join(synced_tables)}",
+                commit=True,
+                admin_user_id=int(current_admin["id"]),
+            )
+
+        return jsonify({"ok": True, "synced_tables": synced_tables})
 
     @app.get("/api/admin/users/<int:user_id>/export/pdf")
     @admin_required_api
@@ -1491,7 +1733,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                     target_id=str(int(cur.lastrowid)),
                     details=f"Created {role} account: {username}",
                 )
-            db.commit()
+            commit_and_sync("users", "admin_activity_logs")
         except sqlite3.IntegrityError:
             return jsonify({"ok": False, "error": "Username already exists"}), 400
 
@@ -1554,7 +1796,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                         f"fields: {', '.join(changed_fields)}"
                     ),
                 )
-            db.commit()
+            commit_and_sync("users", "admin_activity_logs")
         except sqlite3.IntegrityError:
             return jsonify({"ok": False, "error": "Username already exists"}), 400
 
@@ -1582,7 +1824,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             target_id=str(user_id),
             details=f"Deleted user account: {row['username']}",
         )
-        db.commit()
+        commit_and_sync("users", "admin_activity_logs")
         return jsonify({"ok": True})
 
     @app.get("/api/admin/overview")
@@ -1828,5 +2070,12 @@ app = create_app(_default_checkpoint, _default_device, _default_db_path)
 
 if __name__ == "__main__":
     args = parse_args()
-    runtime_app = create_app(args.checkpoint, args.device, args.db_path)
+    if (
+        args.checkpoint == _default_checkpoint
+        and args.device == _default_device
+        and args.db_path == _default_db_path
+    ):
+        runtime_app = app
+    else:
+        runtime_app = create_app(args.checkpoint, args.device, args.db_path)
     runtime_app.run(host=args.host, port=args.port, debug=args.debug)
