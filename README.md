@@ -2,6 +2,14 @@
 
 College project with a working web portal, role-based login, SQLite storage, handwriting filters, and speech output.
 
+## Live Connectivity (Web)
+
+The web portal  are connected to the same backend API.
+
+- Web portal: https://reco-handwriting-portal.onrender.com
+- 
+- Backend API: https://reco-handwriting-portal.onrender.com/api/health
+
 ## Main Features
 
 - CRNN model (CNN + BiLSTM + CTC) for handwriting recognition.
