@@ -22,3 +22,7 @@ tmp/
 # Firebase CLI state
 .firebase/
 firebase-debug.log*
+
+# Ruflo local orchestration state
+.claude-flow/
+.swarm/

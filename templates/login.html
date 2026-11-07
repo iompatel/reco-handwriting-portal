@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0d0d0f" media="(prefers-color-scheme: dark)" />
     <meta name="description" content="Sign in to the Reco handwriting recognition workspace." />
@@ -13,6 +13,7 @@
     <div class="bg-glow glow-a" aria-hidden="true"></div>
     <div class="bg-glow glow-b" aria-hidden="true"></div>
     <main class="auth-shell">
+      <a class="skip-link" href="#main-content">Skip to sign in</a>
       {% if not login_only %}
       <section class="card intro">
         <div class="brand-lockup">
@@ -60,7 +61,7 @@
       </section>
       {% endif %}
 
-      <section class="card forms{% if login_only %} forms-only{% endif %}" aria-label="Account access">
+      <section id="main-content" class="card forms{% if login_only %} forms-only{% endif %}" aria-label="Account access" tabindex="-1">
         {% if login_only %}
         <a href="{{ url_for('login_page') }}" class="text-link back-to-intro">Back to overview</a>
         {% endif %}
@@ -69,7 +70,11 @@
         <form id="login-form" class="form-block">
           <div class="form-head">
             <p class="kicker">Portal access</p>
+            {% if login_only %}
+            <h1>Welcome back</h1>
+            {% else %}
             <h2>Welcome back</h2>
+            {% endif %}
             <p>Sign in to continue to your recognition workspace.</p>
           </div>
           <label>
@@ -123,7 +128,7 @@
             <span>Continue with Google</span>
           </button>
           {% if not firebase_google_enabled %}
-          <p class="oauth-note">Google login is disabled. Ask admin to configure Firebase keys.</p>
+          <p class="oauth-note">Google sign-in is currently unavailable.</p>
           {% endif %}
           <div class="form-links">
             <span>New to Reco?</span>
@@ -172,7 +177,15 @@
             <label>
               Confirm password
               <div class="password-wrap">
-                <input id="reg-confirm" type="password" required minlength="6" autocomplete="new-password" placeholder="Repeat your password" />
+                <input
+                  id="reg-confirm"
+                  type="password"
+                  required
+                  minlength="6"
+                  autocomplete="new-password"
+                  placeholder="Repeat your password"
+                  aria-describedby="reg-confirm-error"
+                />
                 <button
                   type="button"
                   class="toggle-password"
@@ -184,6 +197,7 @@
                   Show
                 </button>
               </div>
+              <span id="reg-confirm-error" class="field-error hidden" role="alert">Passwords do not match.</span>
             </label>
           </div>
           <button type="submit">Create Account</button>
@@ -196,7 +210,7 @@
     </main>
 
     <div id="global-loader" class="rnn-loader hidden" role="status" aria-live="polite" aria-label="Loading">
-      <div class="rnn-loader-card">
+      <div id="global-loader-card" class="rnn-loader-card" tabindex="-1">
         <div class="rnn-loader-track" aria-hidden="true">
           <span class="rnn-loader-letter">R</span>
           <span class="rnn-loader-letter">N</span>

@@ -8,16 +8,18 @@
   --surface-hover: rgba(118, 118, 128, 0.12);
   --text: #1d1d1f;
   --secondary: #5f5f64;
-  --tertiary: #7d7d83;
-  --blue: #0071e3;
-  --blue-hover: #0077ed;
+  --tertiary: #6e6e73;
+  --blue: #0066cc;
+  --blue-hover: #005bb5;
+  --button-blue: #0066cc;
+  --button-blue-hover: #005bb5;
   --blue-soft: rgba(0, 113, 227, 0.1);
   --green: #187a3f;
   --red: #b42318;
   --orange: #a05a00;
   --separator: rgba(60, 60, 67, 0.16);
   --separator-strong: rgba(60, 60, 67, 0.24);
-  --focus: 0 0 0 4px rgba(0, 113, 227, 0.2);
+  --focus: 0 0 0 3px var(--surface-solid), 0 0 0 6px var(--blue);
   --shadow-panel: 0 18px 48px rgba(20, 28, 40, 0.08);
   --shadow-popover: 0 22px 60px rgba(20, 28, 40, 0.18);
   --radius-xl: 28px;
@@ -113,6 +115,25 @@ a {
   clip: rect(0, 0, 0, 0) !important;
   white-space: nowrap !important;
   border: 0 !important;
+}
+
+.skip-link {
+  position: fixed;
+  top: max(8px, env(safe-area-inset-top));
+  left: max(8px, env(safe-area-inset-left));
+  z-index: 300;
+  padding: 10px 14px;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--button-blue);
+  font-weight: 650;
+  text-decoration: none;
+  transform: translateY(-160%);
+  transition: transform 140ms var(--ease-out);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
 }
 
 .backdrop {
@@ -272,7 +293,7 @@ h3 {
 
 .btn.primary {
   color: #fff;
-  background: var(--blue);
+  background: var(--button-blue);
   box-shadow: 0 8px 18px rgba(0, 113, 227, 0.2);
 }
 
@@ -319,8 +340,9 @@ h3 {
 }
 
 .profile-menu {
-  position: absolute;
-  top: calc(100% + 10px);
+  position: fixed;
+  inset: auto;
+  margin: 0;
   right: 0;
   z-index: 50;
   width: min(320px, calc(100vw - 28px));
@@ -333,6 +355,10 @@ h3 {
   backdrop-filter: blur(28px) saturate(180%);
   transform-origin: top right;
   animation: popover-in 180ms var(--ease-out) both;
+}
+
+.profile-menu:not(:popover-open) {
+  display: none;
 }
 
 @keyframes popover-in {
@@ -364,9 +390,13 @@ h3 {
 }
 
 .profile-avatar-btn {
-  min-height: 36px;
+  min-height: 44px;
   padding: 7px 12px;
   font-size: 12px;
+}
+
+.profile-avatar-wrap:focus-within .profile-avatar-btn {
+  box-shadow: var(--focus);
 }
 
 .profile-row {
@@ -606,6 +636,16 @@ h3 {
 
 .status.success {
   color: var(--green);
+}
+
+.global-status:not(:empty) {
+  margin: 0 4px 12px;
+  padding: 10px 14px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
 }
 
 .settings {
@@ -1018,6 +1058,11 @@ input[type="checkbox"]:focus-visible {
   -webkit-overflow-scrolling: touch;
 }
 
+.table-wrap:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
 .data-table {
   width: 100%;
   min-width: 680px;
@@ -1203,9 +1248,25 @@ input[type="checkbox"]:focus-visible {
   position: fixed;
   inset: 0;
   z-index: 120;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  border: 0;
   padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   display: grid;
   place-items: center;
+  background: rgba(18, 18, 20, 0.42);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.editor-modal:not([open]) {
+  display: none;
+}
+
+.editor-modal::backdrop {
   background: rgba(18, 18, 20, 0.42);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
@@ -1247,6 +1308,24 @@ input[type="checkbox"]:focus-visible {
   border: 1px solid var(--separator);
   border-radius: var(--radius-md);
   background: var(--surface-muted);
+}
+
+.editor-crop-controls {
+  margin: 13px 0 0;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(76px, 1fr)) auto;
+  align-items: end;
+  gap: 9px;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-md);
+}
+
+.editor-crop-controls legend {
+  padding: 0 5px;
+  color: var(--secondary);
+  font-size: 12px;
+  font-weight: 620;
 }
 
 #editor-canvas {
@@ -1393,7 +1472,7 @@ input[type="checkbox"]:focus-visible {
 
 @media (hover: hover) and (pointer: fine) {
   .btn.primary:hover:not(:disabled) {
-    background: var(--blue-hover);
+    background: var(--button-blue-hover);
   }
 
   .btn.ghost:hover:not(:disabled),
@@ -1539,9 +1618,18 @@ input[type="checkbox"]:focus-visible {
   }
 
   .primary-nav .btn {
-    min-height: 40px;
+    min-height: 44px;
     padding-inline: 12px;
     font-size: 13px;
+  }
+
+  .primary-nav {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .primary-nav .btn {
+    flex: 1 1 auto;
   }
 
   .workspace,
@@ -1653,6 +1741,14 @@ input[type="checkbox"]:focus-visible {
   .editor-actions .btn {
     width: 100%;
   }
+
+  .editor-crop-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .editor-crop-controls .btn {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -1667,15 +1763,17 @@ input[type="checkbox"]:focus-visible {
     --text: #f5f5f7;
     --secondary: #c2c2c8;
     --tertiary: #98989f;
-    --blue: #2997ff;
-    --blue-hover: #46a6ff;
+    --blue: #64b5ff;
+    --blue-hover: #8ac7ff;
+    --button-blue: #0066cc;
+    --button-blue-hover: #005bb5;
     --blue-soft: rgba(41, 151, 255, 0.14);
     --green: #55d17c;
     --red: #ff6961;
     --orange: #ffb340;
     --separator: rgba(235, 235, 245, 0.14);
     --separator-strong: rgba(235, 235, 245, 0.24);
-    --focus: 0 0 0 4px rgba(41, 151, 255, 0.25);
+    --focus: 0 0 0 3px var(--surface-solid), 0 0 0 6px var(--blue);
     --shadow-panel: 0 20px 52px rgba(0, 0, 0, 0.28);
     --shadow-popover: 0 24px 68px rgba(0, 0, 0, 0.48);
   }
@@ -1739,6 +1837,22 @@ input[type="checkbox"]:focus-visible {
   select,
   textarea {
     border-color: var(--separator-strong);
+  }
+}
+
+@media (prefers-color-scheme: dark) and (prefers-contrast: more) {
+  :root {
+    --separator: rgba(235, 235, 245, 0.42);
+    --separator-strong: rgba(235, 235, 245, 0.68);
+  }
+}
+
+@media (pointer: coarse) {
+  .nav-link-btn,
+  .profile-avatar-btn,
+  .table-actions .btn,
+  .preview-actions .btn {
+    min-height: 44px;
   }
 }
 

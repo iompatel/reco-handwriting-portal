@@ -117,7 +117,7 @@ def random_phrase(
     return text
 
 
-def fit_font(text: str, fonts: list[Path], width: int, height: int) -> ImageFont.ImageFont:
+def fit_font(text: str, fonts: list[Path], width: int, height: int) -> ImageFont.ImageFont | None:
     probe = Image.new("L", (width, height), color=255)
     draw = ImageDraw.Draw(probe)
 
@@ -135,10 +135,20 @@ def fit_font(text: str, fonts: list[Path], width: int, height: int) -> ImageFont
             if text_w <= width - 4 and text_h <= height - 2:
                 return font
 
-    return ImageFont.load_default()
+    fallback = ImageFont.load_default()
+    bbox = draw.textbbox((0, 0), text, font=fallback)
+    if bbox[2] - bbox[0] <= width - 4 and bbox[3] - bbox[1] <= height - 2:
+        return fallback
+    return None
 
 
-def render_sample(text: str, fonts: list[Path], width: int, height: int, notebook_prob: float) -> Image.Image:
+def render_sample(
+    text: str,
+    fonts: list[Path],
+    width: int,
+    height: int,
+    notebook_prob: float,
+) -> Image.Image | None:
     image = Image.new("RGB", (width, height), color=(255, 255, 255))
     draw = ImageDraw.Draw(image)
 
@@ -150,14 +160,14 @@ def render_sample(text: str, fonts: list[Path], width: int, height: int, noteboo
             draw.line([(0, y), (width, y)], fill=(line_color, line_color, line_color), width=1)
 
     font = fit_font(text, fonts, width, height)
+    if font is None:
+        return None
     bbox = draw.textbbox((0, 0), text, font=font)
     text_w = bbox[2] - bbox[0]
     text_h = bbox[3] - bbox[1]
 
-    x_max = max(1, width - text_w - 2)
-    y_max = max(1, height - text_h - 2)
-    x = random.randint(1, x_max)
-    y = random.randint(0, y_max)
+    ink_left = random.randint(2, width - text_w - 2)
+    ink_top = random.randint(1, height - text_h - 1)
 
     ink_palette = [
         (22, 35, 110),  # blue pen
@@ -165,7 +175,12 @@ def render_sample(text: str, fonts: list[Path], width: int, height: int, noteboo
         (85, 20, 90),  # violet pen
         (25, 70, 28),  # green pen
     ]
-    draw.text((x, y), text, fill=random.choice(ink_palette), font=font)
+    draw.text(
+        (ink_left - bbox[0], ink_top - bbox[1]),
+        text,
+        fill=random.choice(ink_palette),
+        font=font,
+    )
 
     for _ in range(random.randint(24, 120)):
         px = random.randint(0, width - 1)
@@ -173,8 +188,6 @@ def render_sample(text: str, fonts: list[Path], width: int, height: int, noteboo
         noise = random.randint(180, 255)
         image.putpixel((px, py), (noise, noise, noise))
 
-    if random.random() < 0.35:
-        image = image.rotate(random.uniform(-5, 5), resample=Image.BILINEAR, fillcolor=(255, 255, 255))
     if random.random() < 0.4:
         image = image.filter(ImageFilter.GaussianBlur(radius=random.uniform(0.1, 0.9)))
     if random.random() < 0.5:
@@ -204,16 +217,21 @@ def generate_split(
 ) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     for i in range(count):
-        text = random_phrase(
-            word_pool=word_pool,
-            alphabet=alphabet,
-            min_len=min_len,
-            max_len=max_len,
-            min_words=min_words,
-            max_words=max_words,
-            phrase_prob=phrase_prob,
-        )
-        image = render_sample(text, fonts, width, height, notebook_prob=notebook_prob)
+        for _ in range(100):
+            text = random_phrase(
+                word_pool=word_pool,
+                alphabet=alphabet,
+                min_len=min_len,
+                max_len=max_len,
+                min_words=min_words,
+                max_words=max_words,
+                phrase_prob=phrase_prob,
+            )
+            image = render_sample(text, fonts, width, height, notebook_prob=notebook_prob)
+            if image is not None:
+                break
+        else:
+            raise RuntimeError(f"Could not generate a fitting {split} sample after 100 attempts")
 
         name = f"{split}_{i:06d}.png"
         rel_path = Path("images") / name

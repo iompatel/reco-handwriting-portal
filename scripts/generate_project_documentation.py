@@ -357,19 +357,22 @@ User Browser -> Flask App: GET /results and GET /api/history
 [users] 1 -------- * [user_sessions]
   PK id                PK id
                        FK user_id -> users.id
+                       session_token
                        is_active
                        login_at
                        logout_at
 
-[users] 1 -------- * [admin_activity_logs]
-  PK id                PK id
-                       FK admin_user_id -> users.id
-                       action
-                       target_type
-                       target_id
-                       details
-                       ip_address
-                       created_at
+[admin_activity_logs]
+  PK id
+  admin_user_id (historical actor ID; retained after account deletion)
+  admin_username (immutable snapshot)
+  admin_full_name (immutable snapshot)
+  action
+  target_type
+  target_id
+  details
+  ip_address
+  created_at
 """.strip(
             "\n"
         ),
@@ -743,6 +746,7 @@ Documentation + Viva Prep                           [########]
             ["Field", "Type", "Description"],
             ["id", "INTEGER PK", "Detection record ID"],
             ["user_id", "INTEGER FK", "Reference to users.id"],
+            ["session_token", "TEXT", "Random server-side token bound to the signed cookie"],
             ["file_name", "TEXT", "Uploaded file name"],
             ["prediction", "TEXT", "Recognized text result"],
             ["confidence", "REAL", "Prediction confidence score"],
@@ -774,7 +778,9 @@ Documentation + Viva Prep                           [########]
         [
             ["Field", "Type", "Description"],
             ["id", "INTEGER PK", "Activity row ID"],
-            ["admin_user_id", "INTEGER FK", "Reference to users.id (admin)"],
+            ["admin_user_id", "INTEGER", "Historical administrator ID retained after account deletion"],
+            ["admin_username", "TEXT", "Administrator username snapshot retained for audit history"],
+            ["admin_full_name", "TEXT", "Administrator name snapshot retained for audit history"],
             ["action", "TEXT", "Operation type (login, delete history, etc.)"],
             ["target_type", "TEXT", "Target entity type"],
             ["target_id", "TEXT", "Target record identifier"],

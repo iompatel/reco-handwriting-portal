@@ -92,7 +92,26 @@ function updateAvatarPreview(avatarUrl, displayName) {
 
 function setProfileMenuOpen(isOpen) {
   if (!refs.profileMenu || !refs.profileToggle) return;
-  refs.profileMenu.classList.toggle("hidden", !isOpen);
+  if (typeof refs.profileMenu.showPopover === "function") {
+    const isOpenNow = refs.profileMenu.matches(":popover-open");
+    if (isOpen && !isOpenNow) {
+      refs.profileMenu.classList.remove("hidden");
+      const rect = refs.profileToggle.getBoundingClientRect();
+      refs.profileMenu.style.top = `${rect.bottom + 8}px`;
+      refs.profileMenu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+      refs.profileMenu.showPopover();
+      refs.profileMenu.focus();
+    } else if (!isOpen && isOpenNow) {
+      const returnFocus = refs.profileMenu.contains(document.activeElement);
+      refs.profileMenu.hidePopover();
+      refs.profileMenu.classList.add("hidden");
+      if (returnFocus) refs.profileToggle.focus();
+    }
+  } else {
+    const returnFocus = !isOpen && refs.profileMenu.contains(document.activeElement);
+    refs.profileMenu.classList.toggle("hidden", !isOpen);
+    if (returnFocus) refs.profileToggle.focus();
+  }
   refs.profileToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
 }
 
@@ -102,7 +121,9 @@ function closeProfileMenu() {
 
 function toggleProfileMenu() {
   if (!refs.profileMenu) return;
-  const shouldOpen = refs.profileMenu.classList.contains("hidden");
+  const shouldOpen = typeof refs.profileMenu.showPopover === "function"
+    ? !refs.profileMenu.matches(":popover-open")
+    : refs.profileMenu.classList.contains("hidden");
   setProfileMenuOpen(shouldOpen);
 }
 
@@ -310,12 +331,19 @@ async function bootstrapUser() {
 
 function attachEvents() {
   refs.profileToggle?.addEventListener("click", (event) => {
+    event.preventDefault();
     event.stopPropagation();
     toggleProfileMenu();
   });
 
   refs.profileMenu?.addEventListener("click", (event) => {
     event.stopPropagation();
+  });
+  refs.profileMenu?.addEventListener("toggle", () => {
+    const isOpen = refs.profileMenu.matches(":popover-open");
+    refs.profileMenu.classList.toggle("hidden", !isOpen);
+    refs.profileToggle?.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    if (!isOpen && refs.profileMenu.contains(document.activeElement)) refs.profileToggle?.focus();
   });
 
   refs.profileLogoutBtn?.addEventListener("click", logoutAndRedirect);

@@ -10,7 +10,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 
 from src.image_utils import open_grayscale, resize_with_padding
-from src.text_utils import CharTokenizer
+from src.text_utils import CharTokenizer, ctc_required_timesteps
 
 
 def load_metadata(
@@ -78,7 +78,7 @@ class HandwritingDataset(Dataset):
             if not clean:
                 self.skipped_invalid += 1
                 continue
-            if self.max_label_len is not None and len(clean) > self.max_label_len:
+            if self.max_label_len is not None and ctc_required_timesteps(clean) > self.max_label_len:
                 self.skipped_too_long += 1
                 continue
             self.rows.append({"image": row["image"], "text": clean, "split": row["split"]})

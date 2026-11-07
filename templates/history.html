@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0d0d0f" media="(prefers-color-scheme: dark)" />
     <meta name="description" content="Review and manage saved handwriting recognition results." />
@@ -12,6 +12,7 @@
   <body>
     <div class="backdrop"></div>
     <main class="shell">
+      <a class="skip-link" href="#main-content">Skip to content</a>
       <header class="panel top-nav app-header">
         <div class="brand-lockup">
           <a href="/" class="brand-mark" aria-label="Reco home">R</a>
@@ -34,10 +35,11 @@
             class="btn ghost profile-toggle"
             aria-expanded="false"
             aria-label="Profile options"
+            popovertarget="profile-menu"
           >
             <img id="profile-toggle-avatar" class="profile-toggle-avatar" alt="Profile" />
           </button>
-          <div id="profile-menu" class="profile-menu hidden" role="dialog" aria-label="User profile">
+          <div id="profile-menu" class="profile-menu hidden" role="dialog" aria-label="User profile" popover="auto" tabindex="-1">
             <div class="profile-avatar-wrap">
               <img id="profile-avatar-preview" class="profile-avatar" alt="Profile image" />
               <label for="profile-avatar-input" class="btn ghost profile-avatar-btn">Upload Image</label>
@@ -65,7 +67,7 @@
         </div>
       </header>
 
-      <section class="panel history-panel history-page-panel">
+      <section id="main-content" class="panel history-panel history-page-panel" tabindex="-1">
         <div class="section-head">
           <div>
             <p class="kicker">Saved work</p>
@@ -90,21 +92,22 @@
             </select>
           </label>
           <button id="history-filter-clear" type="button" class="btn ghost">Clear</button>
-          <p id="history-filter-count" class="history-filter-count">0 records</p>
+          <p id="history-filter-count" class="history-filter-count" aria-live="polite">0 records</p>
         </div>
         <div id="history-status" class="status" aria-live="polite"></div>
-        <div class="table-wrap">
+        <div class="table-wrap" tabindex="0" aria-label="Recognition history table. Scroll horizontally to view every column.">
           <table class="data-table">
+            <caption class="visually-hidden">Recognition history</caption>
             <thead>
               <tr>
-                <th class="admin-history-col hidden">User ID</th>
-                <th class="admin-history-col hidden">Name</th>
-                <th class="admin-history-col hidden">E-mail</th>
-                <th>File</th>
-                <th class="admin-history-col hidden">Source</th>
-                <th>Confidence</th>
-                <th>Time</th>
-                <th>Actions</th>
+                <th scope="col" class="admin-history-col hidden">User ID</th>
+                <th scope="col" class="admin-history-col hidden">Name</th>
+                <th scope="col" class="admin-history-col hidden">E-mail</th>
+                <th scope="col">File</th>
+                <th scope="col" class="admin-history-col hidden">Source</th>
+                <th scope="col">Confidence</th>
+                <th scope="col">Time</th>
+                <th scope="col">Actions</th>
               </tr>
             </thead>
             <tbody id="history-body"></tbody>
@@ -113,10 +116,10 @@
       </section>
     </main>
 
-    <div id="history-view-modal" class="editor-modal hidden" role="dialog" aria-modal="true" aria-labelledby="history-view-title">
+    <dialog id="history-view-modal" class="editor-modal" aria-labelledby="history-view-title">
       <div class="editor-panel history-view-panel">
         <div class="editor-head">
-          <h3 id="history-view-title">Detection Record</h3>
+          <h3 id="history-view-title">Recognition record</h3>
           <button id="history-view-close" type="button" class="btn ghost">Close</button>
         </div>
         <div class="history-view-grid">
@@ -154,8 +157,8 @@
           </div>
         </div>
         <div class="history-view-text-wrap">
-          <p class="history-view-label">Prediction</p>
-          <textarea id="history-view-prediction" readonly></textarea>
+          <label id="history-view-prediction-label" class="history-view-label" for="history-view-prediction">Recognized text</label>
+          <textarea id="history-view-prediction" readonly aria-labelledby="history-view-prediction-label"></textarea>
         </div>
         <div class="history-view-image-wrap">
           <p class="history-view-label">Uploaded Image</p>
@@ -163,7 +166,7 @@
           <p id="history-view-image-note" class="history-view-note">No image preview available.</p>
         </div>
       </div>
-    </div>
+    </dialog>
 
     <script src="{{ url_for('static', filename='history.js') }}"></script>
   </body>

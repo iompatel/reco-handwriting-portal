@@ -32,11 +32,17 @@ const refs = {
   dropZone: document.getElementById("drop-zone"),
   previewGrid: document.getElementById("preview-grid"),
   imageEditorModal: document.getElementById("image-editor-modal"),
+  editorStatus: document.getElementById("editor-status"),
   editorCanvas: document.getElementById("editor-canvas"),
   editorClose: document.getElementById("editor-close"),
   editorRotateLeft: document.getElementById("editor-rotate-left"),
   editorRotateRight: document.getElementById("editor-rotate-right"),
   editorResetCrop: document.getElementById("editor-reset-crop"),
+  editorCropX: document.getElementById("editor-crop-x"),
+  editorCropY: document.getElementById("editor-crop-y"),
+  editorCropWidth: document.getElementById("editor-crop-width"),
+  editorCropHeight: document.getElementById("editor-crop-height"),
+  editorApplyCrop: document.getElementById("editor-apply-crop"),
   editorSave: document.getElementById("editor-save"),
   fileCount: document.getElementById("file-count"),
   runBtn: document.getElementById("run-btn"),
@@ -91,7 +97,9 @@ const refs = {
   adminActivityCount: document.getElementById("admin-activity-count"),
   adminActivityBody: document.getElementById("admin-activity-body"),
   loader: document.getElementById("global-loader"),
+  loaderCard: document.getElementById("global-loader-card"),
   loaderMessage: document.getElementById("global-loader-message"),
+  shell: document.querySelector(".shell"),
 };
 
 const editorState = {
@@ -104,13 +112,15 @@ const editorState = {
 };
 
 let loaderCount = 0;
+let loaderReturnFocus = null;
+let editorOpener = null;
 const adminLiveState = {
   clockTimer: null,
   locationResolved: false,
 };
 
 function isEditorOpen() {
-  return Boolean(refs.imageEditorModal) && !refs.imageEditorModal.classList.contains("hidden");
+  return Boolean(refs.imageEditorModal?.open);
 }
 
 function clamp(value, min, max) {
@@ -314,9 +324,9 @@ function drawEditorCanvas() {
   context.restore();
 }
 
-function closeImageEditor() {
+function closeImageEditor(restoreFocus = true) {
   if (!refs.imageEditorModal) return;
-  refs.imageEditorModal.classList.add("hidden");
+  if (refs.imageEditorModal.open) refs.imageEditorModal.close();
   document.body.classList.remove("modal-open");
   editorState.fileIndex = -1;
   editorState.sourceFile = null;
@@ -324,11 +334,14 @@ function closeImageEditor() {
   editorState.display = null;
   editorState.selection = null;
   editorState.dragging = false;
+  if (restoreFocus) editorOpener?.focus?.();
+  editorOpener = null;
 }
 
 async function openImageEditor(fileIndex) {
   const file = state.files[fileIndex];
   if (!file || !refs.imageEditorModal) return;
+  editorOpener = document.activeElement;
   try {
     const image = await loadImageFromFile(file);
     editorState.fileIndex = fileIndex;
@@ -336,10 +349,12 @@ async function openImageEditor(fileIndex) {
     editorState.image = image;
     editorState.selection = null;
     editorState.dragging = false;
-    refs.imageEditorModal.classList.remove("hidden");
+    refs.imageEditorModal.showModal();
     document.body.classList.add("modal-open");
+    resetCropFields();
     drawEditorCanvas();
-    setStatus("Editor opened. Drag to crop, rotate if needed, then Save.");
+    refs.editorClose?.focus();
+    setEditorStatus("Editor opened. Drag to crop or enter percentages.");
   } catch (error) {
     setStatus(error.message || "Could not open image editor.", true);
   }
@@ -352,15 +367,57 @@ async function rotateEditorImage(angleDegrees) {
     const blob = await canvasToBlob(rotatedCanvas, getOutputMimeType(editorState.sourceFile));
     editorState.image = await loadImageFromBlob(blob);
     editorState.selection = null;
+    resetCropFields();
     drawEditorCanvas();
+    setEditorStatus("Image rotated. Choose a new crop area if needed.");
   } catch (error) {
-    setStatus(error.message || "Rotate failed.", true);
+    setEditorStatus(error.message || "Rotate failed.", true);
   }
 }
 
 function clearEditorSelection() {
   editorState.selection = null;
+  resetCropFields();
   drawEditorCanvas();
+  setEditorStatus("Crop reset.");
+}
+
+function resetCropFields() {
+  if (refs.editorCropX) refs.editorCropX.value = "0";
+  if (refs.editorCropY) refs.editorCropY.value = "0";
+  if (refs.editorCropWidth) refs.editorCropWidth.value = "100";
+  if (refs.editorCropHeight) refs.editorCropHeight.value = "100";
+}
+
+function applyCropFields(announce = true) {
+  if (!editorState.display) return;
+  const x = clamp(Number(refs.editorCropX?.value || 0), 0, 99);
+  const y = clamp(Number(refs.editorCropY?.value || 0), 0, 99);
+  const width = clamp(Number(refs.editorCropWidth?.value || 100), 1, 100 - x);
+  const height = clamp(Number(refs.editorCropHeight?.value || 100), 1, 100 - y);
+  const { offsetX, offsetY, drawW, drawH } = editorState.display;
+  editorState.selection = {
+    x1: offsetX + (x / 100) * drawW,
+    y1: offsetY + (y / 100) * drawH,
+    x2: offsetX + ((x + width) / 100) * drawW,
+    y2: offsetY + ((y + height) / 100) * drawH,
+  };
+  refs.editorCropX.value = String(Math.round(x));
+  refs.editorCropY.value = String(Math.round(y));
+  refs.editorCropWidth.value = String(Math.round(width));
+  refs.editorCropHeight.value = String(Math.round(height));
+  drawEditorCanvas();
+  if (announce) setEditorStatus("Crop area updated.");
+}
+
+function syncCropFieldsFromSelection() {
+  const selection = normalizeSelectionRect(editorState.selection);
+  if (!selection || !editorState.display) return;
+  const { offsetX, offsetY, drawW, drawH } = editorState.display;
+  refs.editorCropX.value = String(Math.round(((selection.x - offsetX) / drawW) * 100));
+  refs.editorCropY.value = String(Math.round(((selection.y - offsetY) / drawH) * 100));
+  refs.editorCropWidth.value = String(Math.round((selection.width / drawW) * 100));
+  refs.editorCropHeight.value = String(Math.round((selection.height / drawH) * 100));
 }
 
 function getSelectedCropInSourcePixels() {
@@ -424,13 +481,17 @@ async function saveEditorChanges() {
       outputCanvas = croppedCanvas;
     }
 
+    const fileIndex = editorState.fileIndex;
     const updatedFile = await canvasToFile(outputCanvas, editorState.sourceFile);
-    state.files[editorState.fileIndex] = updatedFile;
-    closeImageEditor();
+    state.files[fileIndex] = updatedFile;
+    closeImageEditor(false);
     renderPreview();
+    refs.previewGrid
+      ?.querySelector(`[data-action="crop"][data-file-index="${fileIndex}"]`)
+      ?.focus();
     setStatus(crop ? "Image cropped and saved." : "Image saved.");
   } catch (error) {
-    setStatus(error.message || "Failed to save image changes.", true);
+    setEditorStatus(error.message || "Failed to save image changes.", true);
   }
 }
 
@@ -490,7 +551,10 @@ function handleEditorPointerUp(event) {
   const selection = normalizeSelectionRect(editorState.selection);
   if (!selection || selection.width < 4 || selection.height < 4) {
     editorState.selection = null;
+    resetCropFields();
     drawEditorCanvas();
+  } else {
+    syncCropFieldsFromSelection();
   }
 }
 
@@ -502,7 +566,15 @@ function showLoader(message = "Loading...") {
   if (!refs.loader) return;
   loaderCount += 1;
   if (refs.loaderMessage) refs.loaderMessage.textContent = message;
+  if (loaderCount === 1) {
+    loaderReturnFocus = document.activeElement;
+    if (refs.shell) {
+      refs.shell.inert = true;
+      refs.shell.setAttribute("aria-busy", "true");
+    }
+  }
   refs.loader.classList.remove("hidden");
+  refs.loaderCard?.focus();
 }
 
 function hideLoader() {
@@ -511,12 +583,24 @@ function hideLoader() {
   if (loaderCount === 0) {
     refs.loader.classList.add("hidden");
     if (refs.loaderMessage) refs.loaderMessage.textContent = "Loading...";
+    if (refs.shell) {
+      refs.shell.inert = false;
+      refs.shell.removeAttribute("aria-busy");
+    }
+    loaderReturnFocus?.focus?.();
+    loaderReturnFocus = null;
   }
 }
 
 function setStatus(message, isError = false) {
   refs.status.textContent = message;
   refs.status.classList.toggle("error", isError);
+}
+
+function setEditorStatus(message, isError = false) {
+  if (!refs.editorStatus) return;
+  refs.editorStatus.textContent = message;
+  refs.editorStatus.classList.toggle("error", isError);
 }
 
 function setAdminLocationStatus(message, isError = false) {
@@ -763,7 +847,26 @@ function updateAvatarPreview(avatarUrl, displayName) {
 
 function setProfileMenuOpen(isOpen) {
   if (!refs.profileMenu || !refs.profileToggle) return;
-  refs.profileMenu.classList.toggle("hidden", !isOpen);
+  if (typeof refs.profileMenu.showPopover === "function") {
+    const isOpenNow = refs.profileMenu.matches(":popover-open");
+    if (isOpen && !isOpenNow) {
+      refs.profileMenu.classList.remove("hidden");
+      const rect = refs.profileToggle.getBoundingClientRect();
+      refs.profileMenu.style.top = `${rect.bottom + 8}px`;
+      refs.profileMenu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+      refs.profileMenu.showPopover();
+      refs.profileMenu.focus();
+    } else if (!isOpen && isOpenNow) {
+      const returnFocus = refs.profileMenu.contains(document.activeElement);
+      refs.profileMenu.hidePopover();
+      refs.profileMenu.classList.add("hidden");
+      if (returnFocus) refs.profileToggle.focus();
+    }
+  } else {
+    const returnFocus = !isOpen && refs.profileMenu.contains(document.activeElement);
+    refs.profileMenu.classList.toggle("hidden", !isOpen);
+    if (returnFocus) refs.profileToggle.focus();
+  }
   refs.profileToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
 }
 
@@ -773,7 +876,9 @@ function closeProfileMenu() {
 
 function toggleProfileMenu() {
   if (!refs.profileMenu) return;
-  const shouldOpen = refs.profileMenu.classList.contains("hidden");
+  const shouldOpen = typeof refs.profileMenu.showPopover === "function"
+    ? !refs.profileMenu.matches(":popover-open")
+    : refs.profileMenu.classList.contains("hidden");
   setProfileMenuOpen(shouldOpen);
 }
 
@@ -833,7 +938,16 @@ function openFilePicker() {
 function addFiles(fileList) {
   const incoming = Array.from(fileList || []);
   const existing = new Set(state.files.map((file) => `${file.name}-${file.size}-${file.lastModified}`));
+  const allowedExtensions = new Set(["png", "jpg", "jpeg", "bmp", "tif", "tiff"]);
+  const allowedMimeTypes = new Set(["image/png", "image/jpeg", "image/bmp", "image/tiff"]);
+  let rejectedCount = 0;
   for (const file of incoming) {
+    const extension = String(file.name || "").split(".").pop().toLowerCase();
+    const supported = allowedExtensions.has(extension) && (!file.type || allowedMimeTypes.has(file.type));
+    if (!supported || state.files.length >= 20) {
+      rejectedCount += 1;
+      continue;
+    }
     const key = `${file.name}-${file.size}-${file.lastModified}`;
     if (!existing.has(key)) {
       state.files.push(file);
@@ -841,6 +955,9 @@ function addFiles(fileList) {
     }
   }
   renderPreview();
+  if (rejectedCount) {
+    setStatus(`${rejectedCount} file${rejectedCount === 1 ? " was" : "s were"} skipped. Use up to 20 PNG, JPG, BMP, or TIFF images.`, true);
+  }
 }
 
 function clearFiles() {
@@ -904,6 +1021,8 @@ function renderPreview() {
     cropBtn.type = "button";
     cropBtn.className = "btn ghost";
     cropBtn.textContent = "Crop";
+    cropBtn.dataset.action = "crop";
+    cropBtn.dataset.fileIndex = String(fileIndex);
     cropBtn.addEventListener("click", async () => {
       await openImageEditor(fileIndex);
     });
@@ -1169,9 +1288,9 @@ async function runRecognition() {
   form.append("ocr_engine", refs.ocrEngine.value || "auto");
   form.append("ocr_languages", normalizeOcrLanguages(refs.ocrLanguages.value));
 
-  refs.runBtn.disabled = true;
   setStatus("Running recognition...");
-  showLoader("Running RNN recognition...");
+  showLoader("Recognizing text...");
+  refs.runBtn.disabled = true;
 
   try {
     const response = await fetch("/api/predict", { method: "POST", body: form });
@@ -1203,8 +1322,8 @@ async function runRecognition() {
   } catch (error) {
     setStatus(error.message || "Prediction request failed.", true);
   } finally {
-    hideLoader();
     refs.runBtn.disabled = false;
+    hideLoader();
   }
 }
 
@@ -1545,12 +1664,19 @@ async function bootstrapUser() {
 
 function attachEvents() {
   refs.profileToggle?.addEventListener("click", (event) => {
+    event.preventDefault();
     event.stopPropagation();
     toggleProfileMenu();
   });
 
   refs.profileMenu?.addEventListener("click", (event) => {
     event.stopPropagation();
+  });
+  refs.profileMenu?.addEventListener("toggle", () => {
+    const isOpen = refs.profileMenu.matches(":popover-open");
+    refs.profileMenu.classList.toggle("hidden", !isOpen);
+    refs.profileToggle?.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    if (!isOpen && refs.profileMenu.contains(document.activeElement)) refs.profileToggle?.focus();
   });
 
   refs.profileLogoutBtn?.addEventListener("click", logoutAndRedirect);
@@ -1647,7 +1773,12 @@ function attachEvents() {
     await rotateEditorImage(90);
   });
   refs.editorResetCrop?.addEventListener("click", clearEditorSelection);
+  refs.editorApplyCrop?.addEventListener("click", applyCropFields);
   refs.editorSave?.addEventListener("click", saveEditorChanges);
+  refs.imageEditorModal?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeImageEditor();
+  });
   refs.imageEditorModal?.addEventListener("click", (event) => {
     if (event.target === refs.imageEditorModal) {
       closeImageEditor();
@@ -1660,7 +1791,9 @@ function attachEvents() {
   refs.editorCanvas?.addEventListener("pointerleave", handleEditorPointerUp);
   window.addEventListener("resize", () => {
     if (isEditorOpen()) {
+      const hadSelection = Boolean(editorState.selection);
       drawEditorCanvas();
+      if (hadSelection) applyCropFields(false);
     }
   });
   window.addEventListener("beforeunload", () => {

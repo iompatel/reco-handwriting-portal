@@ -1,7 +1,9 @@
 const refs = {
   status: document.getElementById("auth-status"),
   loader: document.getElementById("global-loader"),
+  loaderCard: document.getElementById("global-loader-card"),
   loaderMessage: document.getElementById("global-loader-message"),
+  shell: document.querySelector(".auth-shell"),
   loginForm: document.getElementById("login-form"),
   loginUsername: document.getElementById("login-username"),
   loginPassword: document.getElementById("login-password"),
@@ -10,6 +12,7 @@ const refs = {
   regUsername: document.getElementById("reg-username"),
   regPassword: document.getElementById("reg-password"),
   regConfirm: document.getElementById("reg-confirm"),
+  regConfirmError: document.getElementById("reg-confirm-error"),
   showRegister: document.getElementById("show-register"),
   showLoginFromRegister: document.getElementById("show-login-from-register"),
   googleLoginButton: document.getElementById("google-login-button"),
@@ -21,6 +24,7 @@ const firebaseGoogleEnabled = Boolean(window.firebaseGoogleEnabled);
 let firebaseAuthClient = null;
 let firebaseModules = null;
 let loaderCount = 0;
+let loaderReturnFocus = null;
 
 function setStatus(message, type = "") {
   refs.status.textContent = message;
@@ -31,7 +35,15 @@ function showLoader(message = "Loading...") {
   if (!refs.loader) return;
   loaderCount += 1;
   if (refs.loaderMessage) refs.loaderMessage.textContent = message;
+  if (loaderCount === 1) {
+    loaderReturnFocus = document.activeElement;
+    if (refs.shell) {
+      refs.shell.inert = true;
+      refs.shell.setAttribute("aria-busy", "true");
+    }
+  }
   refs.loader.classList.remove("hidden");
+  refs.loaderCard?.focus();
 }
 
 function hideLoader() {
@@ -40,11 +52,17 @@ function hideLoader() {
   if (loaderCount === 0) {
     refs.loader.classList.add("hidden");
     if (refs.loaderMessage) refs.loaderMessage.textContent = "Loading...";
+    if (refs.shell) {
+      refs.shell.inert = false;
+      refs.shell.removeAttribute("aria-busy");
+    }
+    loaderReturnFocus?.focus?.();
+    loaderReturnFocus = null;
   }
 }
 
 async function apiFetch(url, payload) {
-  showLoader("RNN loading...");
+  showLoader("Working...");
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -78,6 +96,14 @@ function showAuthForm(view) {
     if (!form) return;
     form.classList.toggle("is-hidden", name !== view);
   });
+  requestAnimationFrame(() => {
+    (view === "register" ? refs.regFullName : refs.loginUsername)?.focus();
+  });
+}
+
+function clearConfirmError() {
+  refs.regConfirm?.removeAttribute("aria-invalid");
+  refs.regConfirmError?.classList.add("hidden");
 }
 
 function initPasswordToggles() {
@@ -205,7 +231,7 @@ refs.googleLoginButton?.addEventListener("click", handleGoogleLogin);
 
 refs.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  setStatus("Logging in...");
+  setStatus("Signing in...");
   try {
     await apiFetch("/api/auth/login", {
       username: refs.loginUsername.value,
@@ -220,9 +246,13 @@ refs.loginForm.addEventListener("submit", async (event) => {
 
 refs.registerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  clearConfirmError();
 
   if (refs.regPassword.value !== refs.regConfirm.value) {
     setStatus("Passwords do not match.", "error");
+    refs.regConfirm.setAttribute("aria-invalid", "true");
+    refs.regConfirmError.classList.remove("hidden");
+    refs.regConfirm.focus();
     return;
   }
 
@@ -238,11 +268,12 @@ refs.registerForm.addEventListener("submit", async (event) => {
     refs.loginPassword.value = "";
     refs.registerForm.reset();
     showAuthForm("login");
-    setStatus("Account created. Please login.", "success");
+    setStatus("Account created. Please sign in.", "success");
   } catch (error) {
     setStatus(error.message, "error");
   }
 });
 
-showAuthForm("login");
+refs.regConfirm?.addEventListener("input", clearConfirmError);
+
 initPasswordToggles();

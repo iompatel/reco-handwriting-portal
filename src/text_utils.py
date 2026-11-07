@@ -6,6 +6,11 @@ from typing import Iterable, Sequence
 DEFAULT_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789 "
 
 
+def ctc_required_timesteps(text: str) -> int:
+    adjacent_repeats = sum(left == right for left, right in zip(text, text[1:]))
+    return len(text) + adjacent_repeats
+
+
 @dataclass
 class CharTokenizer:
     alphabet: str = DEFAULT_ALPHABET

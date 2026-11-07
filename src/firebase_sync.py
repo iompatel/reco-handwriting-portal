@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 from collections.abc import Iterable, Sequence
 from datetime import datetime, timezone
 from logging import Logger
+
+from src.database import validate_confidence
 
 try:
     from firebase_admin import firestore
@@ -36,6 +39,7 @@ FIREBASE_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
     "user_sessions": (
         "id",
         "user_id",
+        "session_token",
         "is_active",
         "login_at",
         "last_seen",
@@ -56,6 +60,8 @@ FIREBASE_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
     "admin_activity_logs": (
         "id",
         "admin_user_id",
+        "admin_username",
+        "admin_full_name",
         "action",
         "target_type",
         "target_id",
@@ -85,6 +91,8 @@ class FirebaseDataSync:
         self.retry_interval_seconds = max(30, int(retry_interval_seconds))
         self._runtime_disabled_until = 0.0
         self.last_error_reason = ""
+        self.last_restore_succeeded: bool | None = None
+        self._sync_lock = threading.RLock()
 
         if enabled and not FIRESTORE_AVAILABLE:
             self.logger.warning("firebase-admin firestore module not available; Firebase data sync is disabled.")
@@ -136,6 +144,7 @@ class FirebaseDataSync:
             ("users", "avatar_path"): "",
             ("users", "created_at"): timestamp_now,
             ("users", "last_login"): None,
+            ("user_sessions", "session_token"): "",
             ("user_sessions", "is_active"): 1,
             ("user_sessions", "login_at"): timestamp_now,
             ("user_sessions", "last_seen"): timestamp_now,
@@ -149,6 +158,8 @@ class FirebaseDataSync:
             ("detection_history", "created_at"): timestamp_now,
             ("detection_history", "updated_at"): timestamp_now,
             ("admin_activity_logs", "action"): "UNKNOWN",
+            ("admin_activity_logs", "admin_username"): "",
+            ("admin_activity_logs", "admin_full_name"): "",
             ("admin_activity_logs", "target_type"): "",
             ("admin_activity_logs", "target_id"): "",
             ("admin_activity_logs", "details"): "",
@@ -171,15 +182,28 @@ class FirebaseDataSync:
                 except (TypeError, ValueError):
                     value = 0
             if column_name == "confidence" and value is not None:
-                try:
-                    value = float(value)
-                except (TypeError, ValueError):
-                    value = 0.0
+                value = validate_confidence(value)
 
             normalized[column_name] = value
         return normalized
 
     def sync_table(
+        self,
+        db: sqlite3.Connection,
+        table_name: str,
+        *,
+        min_interval_seconds: int = 0,
+        force: bool = False,
+    ) -> bool:
+        with self._sync_lock:
+            return self._sync_table(
+                db,
+                table_name,
+                min_interval_seconds=min_interval_seconds,
+                force=force,
+            )
+
+    def _sync_table(
         self,
         db: sqlite3.Connection,
         table_name: str,
@@ -247,6 +271,16 @@ class FirebaseDataSync:
         *,
         force: bool = False,
     ) -> bool:
+        with self._sync_lock:
+            return self._sync_rows(db, rows, force=force)
+
+    def _sync_rows(
+        self,
+        db: sqlite3.Connection,
+        rows: Sequence[tuple[str, int]],
+        *,
+        force: bool = False,
+    ) -> bool:
         """Push only the given (table, id) rows; a missing local row deletes its remote document."""
         if self._client is None:
             return False
@@ -291,16 +325,17 @@ class FirebaseDataSync:
         min_interval_seconds: int = 0,
         force: bool = False,
     ) -> list[str]:
-        synced: list[str] = []
-        for table_name in dict.fromkeys(table_names):
-            if self.sync_table(
-                db,
-                table_name,
-                min_interval_seconds=min_interval_seconds,
-                force=force,
-            ):
-                synced.append(table_name)
-        return synced
+        with self._sync_lock:
+            synced: list[str] = []
+            for table_name in dict.fromkeys(table_names):
+                if self._sync_table(
+                    db,
+                    table_name,
+                    min_interval_seconds=min_interval_seconds,
+                    force=force,
+                ):
+                    synced.append(table_name)
+            return synced
 
     def sync_all(
         self,
@@ -317,6 +352,11 @@ class FirebaseDataSync:
         )
 
     def restore_all_to_sqlite(self, db: sqlite3.Connection, *, force: bool = False) -> dict[str, int]:
+        with self._sync_lock:
+            return self._restore_all_to_sqlite(db, force=force)
+
+    def _restore_all_to_sqlite(self, db: sqlite3.Connection, *, force: bool = False) -> dict[str, int]:
+        self.last_restore_succeeded = False
         if not self.enabled or self._client is None:
             return {}
 
@@ -340,6 +380,7 @@ class FirebaseDataSync:
                 total_records += len(rows)
 
             if total_records == 0 and not force:
+                self.last_restore_succeeded = True
                 return {}
 
             db.execute("PRAGMA foreign_keys = OFF")
@@ -362,10 +403,40 @@ class FirebaseDataSync:
                     values,
                 )
                 max_id = max(int(row["id"]) for row in rows)
-                db.execute(
-                    "INSERT INTO sqlite_sequence(name, seq) VALUES(?, ?)",
-                    (table_name, max_id),
+                updated = db.execute(
+                    "UPDATE sqlite_sequence SET seq = ? WHERE name = ?",
+                    (max_id, table_name),
                 )
+                if updated.rowcount == 0:
+                    db.execute(
+                        "INSERT INTO sqlite_sequence(name, seq) VALUES(?, ?)",
+                        (table_name, max_id),
+                    )
+
+            db.execute(
+                """
+                UPDATE user_sessions
+                SET is_active = 0,
+                    logout_at = COALESCE(logout_at, CURRENT_TIMESTAMP),
+                    last_seen = CURRENT_TIMESTAMP
+                """
+            )
+            db.execute(
+                """
+                UPDATE admin_activity_logs
+                SET admin_username = COALESCE(
+                        NULLIF(admin_username, ''),
+                        (SELECT username FROM users WHERE users.id = admin_activity_logs.admin_user_id),
+                        'deleted-admin-' || admin_user_id
+                    ),
+                    admin_full_name = COALESCE(
+                        NULLIF(admin_full_name, ''),
+                        (SELECT full_name FROM users WHERE users.id = admin_activity_logs.admin_user_id),
+                        'Deleted admin #' || admin_user_id
+                    )
+                WHERE admin_username = '' OR admin_full_name = ''
+                """
+            )
 
             violations = db.execute("PRAGMA foreign_key_check").fetchall()
             if violations:
@@ -376,6 +447,7 @@ class FirebaseDataSync:
 
             db.commit()
             db.execute("PRAGMA foreign_keys = ON")
+            self.last_restore_succeeded = True
             return {table_name: len(rows) for table_name, rows in firebase_rows.items() if rows}
         except Exception as exc:
             try:

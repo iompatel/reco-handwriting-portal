@@ -44,6 +44,7 @@ const refs = {
   historyViewImageNote: document.getElementById("history-view-image-note"),
   status: document.getElementById("history-status"),
 };
+let historyViewOpener = null;
 
 async function apiFetch(url, options = {}) {
   const response = await fetch(url, options);
@@ -68,12 +69,19 @@ function setStatus(message, isError = false) {
 }
 
 function isHistoryViewOpen() {
-  return Boolean(refs.historyViewModal) && !refs.historyViewModal.classList.contains("hidden");
+  return Boolean(refs.historyViewModal?.open);
 }
 
 function setHistoryViewOpen(isOpen) {
   if (!refs.historyViewModal) return;
-  refs.historyViewModal.classList.toggle("hidden", !isOpen);
+  if (isOpen && !refs.historyViewModal.open) {
+    refs.historyViewModal.showModal();
+    refs.historyViewClose?.focus();
+  } else if (!isOpen && refs.historyViewModal.open) {
+    refs.historyViewModal.close();
+    historyViewOpener?.focus?.();
+    historyViewOpener = null;
+  }
   document.body.classList.toggle("modal-open", isOpen);
 }
 
@@ -121,7 +129,26 @@ function updateAvatarPreview(avatarUrl, displayName) {
 
 function setProfileMenuOpen(isOpen) {
   if (!refs.profileMenu || !refs.profileToggle) return;
-  refs.profileMenu.classList.toggle("hidden", !isOpen);
+  if (typeof refs.profileMenu.showPopover === "function") {
+    const isOpenNow = refs.profileMenu.matches(":popover-open");
+    if (isOpen && !isOpenNow) {
+      refs.profileMenu.classList.remove("hidden");
+      const rect = refs.profileToggle.getBoundingClientRect();
+      refs.profileMenu.style.top = `${rect.bottom + 8}px`;
+      refs.profileMenu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+      refs.profileMenu.showPopover();
+      refs.profileMenu.focus();
+    } else if (!isOpen && isOpenNow) {
+      const returnFocus = refs.profileMenu.contains(document.activeElement);
+      refs.profileMenu.hidePopover();
+      refs.profileMenu.classList.add("hidden");
+      if (returnFocus) refs.profileToggle.focus();
+    }
+  } else {
+    const returnFocus = !isOpen && refs.profileMenu.contains(document.activeElement);
+    refs.profileMenu.classList.toggle("hidden", !isOpen);
+    if (returnFocus) refs.profileToggle.focus();
+  }
   refs.profileToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
 }
 
@@ -131,7 +158,9 @@ function closeProfileMenu() {
 
 function toggleProfileMenu() {
   if (!refs.profileMenu) return;
-  const shouldOpen = refs.profileMenu.classList.contains("hidden");
+  const shouldOpen = typeof refs.profileMenu.showPopover === "function"
+    ? !refs.profileMenu.matches(":popover-open")
+    : refs.profileMenu.classList.contains("hidden");
   setProfileMenuOpen(shouldOpen);
 }
 
@@ -259,6 +288,7 @@ async function viewHistoryRecord(row) {
     setStatus("Invalid history record.", true);
     return;
   }
+  historyViewOpener = document.activeElement;
   setStatus("Loading record details...");
   try {
     const data = await apiFetch(`/api/history/${row.id}`);
@@ -517,7 +547,7 @@ async function loadHistory(options = {}) {
       updateHistoryFilterCount(state.historyRows.length, state.historyTotal);
     }
 
-    setStatus("History loaded.");
+    if (!silentStatus) setStatus("History loaded.");
   } catch (error) {
     setStatus(error.message || "Failed to load history.", true);
   }
@@ -549,12 +579,19 @@ async function bootstrapUser() {
 
 function attachEvents() {
   refs.profileToggle?.addEventListener("click", (event) => {
+    event.preventDefault();
     event.stopPropagation();
     toggleProfileMenu();
   });
 
   refs.profileMenu?.addEventListener("click", (event) => {
     event.stopPropagation();
+  });
+  refs.profileMenu?.addEventListener("toggle", () => {
+    const isOpen = refs.profileMenu.matches(":popover-open");
+    refs.profileMenu.classList.toggle("hidden", !isOpen);
+    refs.profileToggle?.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    if (!isOpen && refs.profileMenu.contains(document.activeElement)) refs.profileToggle?.focus();
   });
 
   refs.profileLogoutBtn?.addEventListener("click", logoutAndRedirect);
@@ -579,6 +616,10 @@ function attachEvents() {
   });
 
   refs.historyViewClose?.addEventListener("click", closeHistoryView);
+  refs.historyViewModal?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeHistoryView();
+  });
   refs.historyViewModal?.addEventListener("click", (event) => {
     if (event.target === refs.historyViewModal) {
       closeHistoryView();

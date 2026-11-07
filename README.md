@@ -4,10 +4,9 @@ College project with a working web portal, role-based login, SQLite storage, han
 
 ## Live Connectivity (Web)
 
-The web portal  are connected to the same backend API.
+The web portal and backend API run from the same Flask service.
 
 - Web portal: https://reco-handwriting-portal.onrender.com
-- 
 - Backend API: https://reco-handwriting-portal.onrender.com/api/health
 
 ## Main Features
@@ -106,9 +105,9 @@ In the portal:
 On first run, the database creates one admin account from environment variables:
 
 - Username: `ADMIN_USERNAME` (default `admin`)
-- Password: `ADMIN_INITIAL_PASSWORD` (required, minimum 8 characters)
+- Password: `ADMIN_INITIAL_PASSWORD` (minimum 8 characters when set)
 
-If no admin exists and `ADMIN_INITIAL_PASSWORD` is unset, startup fails instead of creating a known password.
+If no admin exists and `ADMIN_INITIAL_PASSWORD` is unset, startup creates a random one-time password and prints it once in the server log.
 Change the password from the admin panel after first login. Password reset by username alone was removed on purpose: it let anyone take over any account.
 
 ## Google Login (Firebase Auth)
@@ -166,15 +165,23 @@ export FIREBASE_SYNC_RETRY_SECONDS="300"
 export FIREBASE_DATA_COLLECTION_PREFIX="reco_prod"
 ```
 
-Before enabling sync in production, Firebase Console me ye ensure karo:
+Optional OCR resource limits:
+
+```bash
+export OCR_MAX_TOTAL_PIXELS="40000000"
+export OCR_MAX_DECODED_BYTES="160000000"
+export OCR_MAX_AVATAR_PIXELS="16000000"
+```
+
+Before enabling sync in production, confirm these Firebase settings:
 - `Build -> Firestore Database` created (Native mode)
 - Google Cloud me `Cloud Firestore API` enabled for your project
 
 How it works:
 - Every write/commit syncs only the changed rows to Firestore; deleting a user triggers one full reconcile so cascade-deleted history and sessions disappear remotely too.
 - On server startup, a full sync runs once (when `FIREBASE_SYNC_ON_STARTUP=true`).
-- On server startup, optional restore from Firestore to local SQLite runs when `FIREBASE_RESTORE_ON_STARTUP=true`. A restore is rejected if it would break foreign keys or leave no admin account.
-- If Firebase temporarily fails, sync auto-retries (interval from `FIREBASE_SYNC_RETRY_SECONDS`).
+- On server startup, optional restore from Firestore seeds SQLite only when the database has no application rows. A persistent recovery marker blocks outbound sync until restore succeeds, and restored browser sessions are invalidated.
+- If Firebase temporarily fails, the next write after `FIREBASE_SYNC_RETRY_SECONDS` performs a full reconciliation.
 - Admin can trigger manual full sync:
   - `POST /api/admin/firebase-sync`
 
@@ -214,6 +221,7 @@ This repo already contains `render.yaml` with a persistent disk + Firebase env p
    - `FIREBASE_RESTORE_ON_STARTUP=true`
    - `FIREBASE_SYNC_RETRY_SECONDS=300`
 6. Deploy.
+   - The included Render image is Tesseract-only: it intentionally excludes PyTorch and model checkpoints. Use a separate model-enabled image if production must run the CRNN engine.
 7. After deploy, run one manual full sync once:
    - Login as admin
    - `POST /api/admin/firebase-sync`

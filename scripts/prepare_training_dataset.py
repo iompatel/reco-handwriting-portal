@@ -86,10 +86,11 @@ def normalize_text(text: str, min_len: int, max_len: int) -> str:
     return cleaned
 
 
-def sanitize_slug(text: str) -> str:
-    value = re.sub(r"[^a-zA-Z0-9_-]+", "_", text.strip())
-    value = re.sub(r"_+", "_", value).strip("_")
-    return value or "source"
+def image_fingerprint(image: Image.Image) -> str:
+    normalized = image.convert("L")
+    digest = hashlib.sha256(f"L:{normalized.width}x{normalized.height}\0".encode("utf-8"))
+    digest.update(normalized.tobytes())
+    return digest.hexdigest()
 
 
 def parse_hf_source(raw: str) -> HFSource:
@@ -164,7 +165,6 @@ def load_hf_rows(
             "HuggingFace datasets package is required. Install with: pip install datasets"
         ) from exc
 
-    source_slug = sanitize_slug(source.dataset.replace("/", "_"))
     dataset = load_dataset(
         source.dataset,
         name=source.config,
@@ -199,7 +199,7 @@ def load_hf_rows(
         elif split_name in {"test", "eval"}:
             default_split = "test"
 
-    for idx, item in enumerate(dataset):
+    for item in dataset:
         if len(rows) >= max_rows:
             break
 
@@ -213,8 +213,10 @@ def load_hf_rows(
             continue
 
         image_obj = image_obj.convert("L")
-        rel_path = Path("images") / f"{source_slug}_{len(rows):07d}.png"
+        fingerprint = image_fingerprint(image_obj)
+        rel_path = Path("images") / f"{fingerprint}.png"
         image_obj.save(out_images / rel_path.name)
+        image_obj.close()
 
         rows.append(
             {
@@ -222,6 +224,7 @@ def load_hf_rows(
                 "text": text,
                 "split": default_split,
                 "source": f"hf:{source.dataset}",
+                "_fingerprint": fingerprint,
             }
         )
 
@@ -326,20 +329,23 @@ def copy_rows_to_output(
     seed: int,
 ) -> list[dict[str, str]]:
     out_rows: list[dict[str, str]] = []
-    seen = set()
+    seen: set[tuple[str, str]] = set()
+    labels_by_fingerprint: dict[str, set[str]] = {}
 
-    for idx, row in enumerate(rows):
+    for row in rows:
         image_abs = row.get("image_abs")
         if not image_abs:
             # Rows that are already copied (HF sources).
             image_rel = row["image"]
+            fingerprint = row.get("_fingerprint", image_rel)
             split = row["split"] or assign_split(
-                key=f"{row['source']}::{image_rel}::{row['text']}",
+                key=fingerprint,
                 train_ratio=train_ratio,
                 val_ratio=val_ratio,
                 seed=seed,
             )
-            dedupe_key = f"{image_rel}::{row['text']}"
+            labels_by_fingerprint.setdefault(fingerprint, set()).add(row["text"])
+            dedupe_key = (fingerprint, row["text"])
             if dedupe_key in seen:
                 continue
             seen.add(dedupe_key)
@@ -349,40 +355,57 @@ def copy_rows_to_output(
                     "text": row["text"],
                     "split": split,
                     "source": row["source"],
+                    "_fingerprint": fingerprint,
                 }
             )
             continue
 
-        source_slug = sanitize_slug(row["source"])
         src_path = Path(image_abs)
-        rel_path = Path("images") / f"{source_slug}_{idx:07d}{src_path.suffix.lower() or '.png'}"
-        target = out_images / rel_path.name
 
         try:
-            image_obj = Image.open(src_path).convert("L")
-            image_obj.save(target)
+            with Image.open(src_path) as source_image:
+                image_obj = source_image.convert("L")
         except Exception:
             continue
 
+        fingerprint = image_fingerprint(image_obj)
+        labels_by_fingerprint.setdefault(fingerprint, set()).add(row["text"])
+        dedupe_key = (fingerprint, row["text"])
+        if dedupe_key in seen:
+            image_obj.close()
+            continue
+        seen.add(dedupe_key)
+
+        rel_path = Path("images") / f"{fingerprint}.png"
+        image_obj.save(out_images / rel_path.name)
+        image_obj.close()
+
         split = row["split"] or assign_split(
-            key=f"{row['source']}::{src_path.as_posix()}::{row['text']}",
+            key=fingerprint,
             train_ratio=train_ratio,
             val_ratio=val_ratio,
             seed=seed,
         )
-        dedupe_key = f"{rel_path.as_posix()}::{row['text']}"
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
         out_rows.append(
             {
                 "image": rel_path.as_posix(),
                 "text": row["text"],
                 "split": split,
                 "source": row["source"],
+                "_fingerprint": fingerprint,
             }
         )
-    return out_rows
+
+    conflicting = {
+        fingerprint
+        for fingerprint, labels in labels_by_fingerprint.items()
+        if len(labels) > 1
+    }
+    return [
+        {key: value for key, value in row.items() if key != "_fingerprint"}
+        for row in out_rows
+        if row["_fingerprint"] not in conflicting
+    ]
 
 
 def main() -> None:

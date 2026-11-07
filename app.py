@@ -24,7 +24,7 @@ from PIL import Image
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
-from src.database import connect_db, init_db
+from src.database import connect_db, init_db, validate_confidence
 from src.firebase_sync import FIREBASE_SYNC_TABLES, FirebaseDataSync
 from src.inference_service import InferenceService, PreprocessConfig
 
@@ -96,6 +96,27 @@ def csv_safe(value: object) -> object:
     return value
 
 
+def sqlite_has_application_rows(db_path: str | Path) -> bool:
+    path = Path(db_path)
+    if not path.is_file() or path.stat().st_size == 0:
+        return False
+    try:
+        conn = sqlite3.connect(path)
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+        }
+        for table_name in FIREBASE_SYNC_TABLES:
+            if table_name in tables and conn.execute(f"SELECT 1 FROM {table_name} LIMIT 1").fetchone():
+                return True
+        return False
+    except sqlite3.DatabaseError as exc:
+        raise RuntimeError(f"Existing SQLite database is unreadable: {path}") from exc
+    finally:
+        if "conn" in locals():
+            conn.close()
+
+
 def keep_alive_target() -> tuple[str, int] | None:
     """Resolve the self-ping URL/interval, or None when keep-alive is disabled."""
     if not parse_bool(os.getenv("KEEP_ALIVE_ENABLED"), default=True):
@@ -156,24 +177,56 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
     max_image_pixels = clamp_int(
         os.getenv("OCR_MAX_IMAGE_PIXELS"), default=40_000_000, min_value=1_000_000, max_value=200_000_000
     )
+    app.config["OCR_MAX_IMAGE_PIXELS"] = max_image_pixels
+    app.config["OCR_MAX_TOTAL_PIXELS"] = clamp_int(
+        os.getenv("OCR_MAX_TOTAL_PIXELS"),
+        default=max_image_pixels,
+        min_value=1_000_000,
+        max_value=400_000_000,
+    )
+    app.config["OCR_MAX_DECODED_BYTES"] = clamp_int(
+        os.getenv("OCR_MAX_DECODED_BYTES"),
+        default=app.config["OCR_MAX_TOTAL_PIXELS"] * 4,
+        min_value=4_000_000,
+        max_value=1_600_000_000,
+    )
+    app.config["OCR_MAX_AVATAR_PIXELS"] = clamp_int(
+        os.getenv("OCR_MAX_AVATAR_PIXELS"),
+        default=16_000_000,
+        min_value=1_000_000,
+        max_value=40_000_000,
+    )
     Image.MAX_IMAGE_PIXELS = max_image_pixels
     ocr_slots = threading.BoundedSemaphore(
         clamp_int(os.getenv("OCR_MAX_CONCURRENCY"), default=2, min_value=1, max_value=16)
     )
-    predict_attempts: dict[int, list[float]] = {}
+    app.extensions["ocr_slots"] = ocr_slots
+    predict_attempts: dict[int, list[tuple[float, int]]] = {}
     predict_attempts_lock = threading.Lock()
 
-    def predict_rate_limited(user_id: int) -> bool:
+    def predict_rate_limited(user_id: int, cost: int = 1) -> bool:
         now = time.monotonic()
+        bounded_cost = max(1, min(10, int(cost)))
         with predict_attempts_lock:
-            attempts = [stamp for stamp in predict_attempts.get(user_id, []) if now - stamp < 60]
-            if len(attempts) >= 10:
+            attempts = [entry for entry in predict_attempts.get(user_id, []) if now - entry[0] < 60]
+            if sum(entry[1] for entry in attempts) + bounded_cost > 10:
                 predict_attempts[user_id] = attempts
                 return True
-            attempts.append(now)
+            attempts.append((now, bounded_cost))
             predict_attempts[user_id] = attempts
         return False
 
+    db_file = Path(db_path)
+    restore_requested = parse_bool(os.getenv("FIREBASE_RESTORE_ON_STARTUP"), default=False)
+    restore_marker = Path(f"{db_file}.restore-pending")
+    recovery_required = restore_marker.exists() or not sqlite_has_application_rows(db_file)
+    if restore_requested and recovery_required:
+        restore_marker.parent.mkdir(parents=True, exist_ok=True)
+        restore_marker.write_text("Firestore restore must complete before outbound sync.\n", encoding="utf-8")
+    elif restore_marker.exists():
+        raise RuntimeError(
+            f"Firebase restore is pending for {db_file}; enable FIREBASE_RESTORE_ON_STARTUP or remove the marker deliberately."
+        )
     service = InferenceService(checkpoint_path=Path(checkpoint), device_name=device)
     init_db(db_path)
 
@@ -300,7 +353,11 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
     ) -> None:
         db = get_db()
         db.commit()
+        if not firebase_data_sync.configured:
+            return
         if not firebase_data_sync.enabled:
+            # A later write is the retry trigger; reconcile everything skipped during the outage.
+            firebase_data_sync.sync_all(db, force=force)
             return
         try:
             if changed_rows:
@@ -317,14 +374,23 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             app.logger.exception("Failed to sync SQLite data to Firebase")
 
     def session_user() -> sqlite3.Row | None:
-        if "user_id" not in session:
+        user_id = session.get("user_id")
+        session_record_id = session.get("session_record_id")
+        session_token = session.get("session_token")
+        if not user_id or not session_record_id or not session_token:
+            session.clear()
             return None
         if "session_user" in g:
             return g.session_user
 
         user = get_db().execute(
-            "SELECT id, username, full_name, role, avatar_path, created_at, last_login FROM users WHERE id = ?",
-            (session["user_id"],),
+            """
+            SELECT u.id, u.username, u.full_name, u.role, u.avatar_path, u.created_at, u.last_login
+            FROM users u
+            JOIN user_sessions s ON s.user_id = u.id
+            WHERE u.id = ? AND s.id = ? AND s.session_token = ? AND s.is_active = 1
+            """,
+            (user_id, session_record_id, session_token),
         ).fetchone()
 
         if user is None:
@@ -379,14 +445,23 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         details: str = "",
     ) -> int:
         db = get_db()
+        actor = db.execute(
+            "SELECT username, full_name FROM users WHERE id = ?",
+            (int(admin_user_id),),
+        ).fetchone()
+        actor_username = actor["username"] if actor is not None else f"deleted-admin-{int(admin_user_id)}"
+        actor_full_name = actor["full_name"] if actor is not None else f"Deleted admin #{int(admin_user_id)}"
         cur = db.execute(
             """
             INSERT INTO admin_activity_logs
-                (admin_user_id, action, target_type, target_id, details, ip_address, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                (admin_user_id, admin_username, admin_full_name, action,
+                 target_type, target_id, details, ip_address, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
             (
                 int(admin_user_id),
+                actor_username,
+                actor_full_name,
                 (action or "UNKNOWN")[:64],
                 (target_type or "")[:64],
                 (target_id or "")[:128],
@@ -437,13 +512,14 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
     def begin_authenticated_session(user: sqlite3.Row) -> None:
         db = get_db()
         session.clear()
+        session_token = secrets.token_urlsafe(32)
         db.execute(
             "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?",
             (int(user["id"]),),
         )
         cur = db.execute(
-            "INSERT INTO user_sessions (user_id, is_active) VALUES (?, 1)",
-            (int(user["id"]),),
+            "INSERT INTO user_sessions (user_id, session_token, is_active) VALUES (?, ?, 1)",
+            (int(user["id"]), session_token),
         )
         if user["role"] == "admin":
             activity_id = insert_admin_activity(
@@ -466,6 +542,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         session["user_id"] = int(user["id"])
         session["role"] = user["role"]
         session["session_record_id"] = int(cur.lastrowid)
+        session["session_token"] = session_token
         g.pop("session_user", None)
 
     def login_template_context(login_only: bool) -> dict[str, object]:
@@ -475,21 +552,29 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             "firebase_google_enabled": firebase_google_enabled,
         }
 
-    if firebase_data_sync.enabled and (
-        parse_bool(os.getenv("FIREBASE_RESTORE_ON_STARTUP"), default=False)
-        or parse_bool(os.getenv("FIREBASE_SYNC_ON_STARTUP"), default=True)
-    ):
+    if restore_requested or parse_bool(os.getenv("FIREBASE_SYNC_ON_STARTUP"), default=True):
         bootstrap_db: sqlite3.Connection | None = None
         try:
             bootstrap_db = connect_db(app.config["DB_PATH"])
-            if parse_bool(os.getenv("FIREBASE_RESTORE_ON_STARTUP"), default=False):
+            if restore_requested and recovery_required:
+                if not firebase_data_sync.configured:
+                    raise RuntimeError("Firebase restore is required but Firebase is not configured")
                 restored_counts = firebase_data_sync.restore_all_to_sqlite(bootstrap_db)
+                if firebase_data_sync.last_restore_succeeded is not True:
+                    raise RuntimeError(
+                        f"Firebase restore failed: {firebase_data_sync.last_error_reason or 'unknown error'}"
+                    )
                 if restored_counts:
                     app.logger.info("Restored SQLite from Firebase: %s", restored_counts)
+                restore_marker.unlink(missing_ok=True)
+            elif restore_requested:
+                app.logger.info("Skipped Firebase restore because local SQLite contains application data.")
             if firebase_data_sync.enabled and parse_bool(os.getenv("FIREBASE_SYNC_ON_STARTUP"), default=True):
                 firebase_data_sync.sync_all(bootstrap_db, force=True)
         except Exception:
             app.logger.exception("Initial Firebase sync failed")
+            if recovery_required:
+                raise
         finally:
             if bootstrap_db is not None:
                 bootstrap_db.close()
@@ -500,15 +585,16 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             return
 
         session_record_id = session.get("session_record_id")
-        if session_record_id:
+        session_token = session.get("session_token")
+        if session_record_id and session_token:
             db = get_db()
             db.execute(
                 """
                 UPDATE user_sessions
                 SET last_seen = CURRENT_TIMESTAMP
-                WHERE id = ? AND is_active = 1
+                WHERE id = ? AND session_token = ? AND is_active = 1
                 """,
-                (session_record_id,),
+                (session_record_id, session_token),
             )
             # Touch locally only; Firestore gets the session row on login/logout.
             db.commit()
@@ -808,14 +894,18 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         if suffix not in ALLOWED_AVATAR_EXTENSIONS:
             return jsonify({"ok": False, "error": "Use PNG, JPG, JPEG or WEBP image."}), 400
 
-        raw_bytes = file.read()
+        avatar_byte_limit = 5 * 1024 * 1024
+        raw_bytes = file.read(avatar_byte_limit + 1)
         if not raw_bytes:
             return jsonify({"ok": False, "error": "Empty image file."}), 400
-        if len(raw_bytes) > 5 * 1024 * 1024:
+        if len(raw_bytes) > avatar_byte_limit:
             return jsonify({"ok": False, "error": "Image is too large. Max 5MB allowed."}), 400
 
         try:
-            image = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+            with Image.open(io.BytesIO(raw_bytes)) as source_image:
+                if source_image.width * source_image.height > app.config["OCR_MAX_AVATAR_PIXELS"]:
+                    return jsonify({"ok": False, "error": "Image dimensions are too large."}), 400
+                image = source_image.convert("RGB")
         except Exception:
             return jsonify({"ok": False, "error": "Invalid image file."}), 400
 
@@ -879,11 +969,13 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
     def predict():
         user = session_user()
         files = request.files.getlist("images")
-        if predict_rate_limited(int(user["id"])):
-            return jsonify({"ok": False, "error": "Too many OCR requests. Wait a minute and try again."}), 429
         if not files:
+            if predict_rate_limited(int(user["id"])):
+                return jsonify({"ok": False, "error": "Too many OCR requests. Wait a minute and try again."}), 429
             return jsonify({"ok": False, "error": "Upload at least one image."}), 400
         if len(files) > max_files_per_request:
+            if predict_rate_limited(int(user["id"]), cost=10):
+                return jsonify({"ok": False, "error": "Too many OCR requests. Wait a minute and try again."}), 429
             return (
                 jsonify(
                     {
@@ -893,6 +985,10 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 ),
                 400,
             )
+
+        file_cost = min(10, max(1, (len(files) + 1) // 2))
+        if predict_rate_limited(int(user["id"]), cost=file_cost):
+            return jsonify({"ok": False, "error": "Too many OCR requests. Wait a minute and try again."}), 429
 
         decode_mode = (request.form.get("decode_mode") or "beam").strip().lower()
         if decode_mode not in {"beam", "greedy"}:
@@ -918,11 +1014,11 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             smart_text_cleanup=parse_bool(request.form.get("smart_text_cleanup"), default=True),
         )
 
-        named_images: list[tuple[str, Image.Image]] = []
-        stored_image_paths: list[str] = []
-        history_ids: list[int] = []
+        prepared_images: list[tuple[int, str, bytes]] = []
         rejected: list[str] = []
-        upload_batch_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+        total_pixels = 0
+        max_total_pixels = int(app.config["OCR_MAX_TOTAL_PIXELS"])
+        max_decoded_bytes = int(app.config["OCR_MAX_DECODED_BYTES"])
 
         for index, file in enumerate(files, start=1):
             filename = secure_filename(file.filename) or f"image_{index}.png"
@@ -932,46 +1028,91 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 continue
 
             try:
-                raw_bytes = file.read()
+                raw_bytes = file.read(max_file_bytes + 1)
                 if not raw_bytes:
                     raise ValueError("Empty file")
                 if len(raw_bytes) > max_file_bytes:
                     raise ValueError("File too large")
 
-                image = Image.open(io.BytesIO(raw_bytes))
-                if image.width * image.height > max_image_pixels:
-                    raise ValueError("Image dimensions too large")
-                image = image.convert("RGB")
-                named_images.append((filename, image))
-                try:
-                    stored_path = save_uploaded_image(
-                        user_id=int(user["id"]),
-                        filename=filename,
-                        raw_bytes=raw_bytes,
-                        batch_id=upload_batch_id,
-                        index=index,
+                with Image.open(io.BytesIO(raw_bytes)) as image:
+                    pixels = image.width * image.height
+                    if pixels > app.config["OCR_MAX_IMAGE_PIXELS"]:
+                        raise ValueError("Image dimensions too large")
+                    image.verify()
+
+                total_pixels += pixels
+                if total_pixels > max_total_pixels or total_pixels * 4 > max_decoded_bytes:
+                    remaining_cost = 10 - file_cost
+                    if remaining_cost and predict_rate_limited(int(user["id"]), cost=remaining_cost):
+                        return jsonify({"ok": False, "error": "Too many OCR requests. Wait a minute and try again."}), 429
+                    return (
+                        jsonify(
+                            {
+                                "ok": False,
+                                "error": "Combined images exceed the server image budget.",
+                                "rejected": rejected,
+                            }
+                        ),
+                        400,
                     )
-                except Exception:
-                    stored_path = ""
-                stored_image_paths.append(stored_path)
+                prepared_images.append((index, filename, raw_bytes))
             except Exception:
                 rejected.append(filename)
 
-        if not named_images:
+        pixel_quantum = max(1, max_total_pixels // 10)
+        pixel_units = max(1, (total_pixels + pixel_quantum - 1) // pixel_quantum)
+        pixel_cost = min(10, max(file_cost, pixel_units))
+        additional_cost = pixel_cost - file_cost
+        if additional_cost and predict_rate_limited(int(user["id"]), cost=additional_cost):
+            return jsonify({"ok": False, "error": "Too many OCR requests. Wait a minute and try again."}), 429
+
+        if not prepared_images:
             message = "No valid image files found. Use PNG/JPG/JPEG/BMP/TIF/TIFF."
             return jsonify({"ok": False, "error": message, "rejected": rejected}), 400
 
+        if not ocr_slots.acquire(blocking=False):
+            response = jsonify({"ok": False, "error": "OCR service is busy. Try again shortly."})
+            response.status_code = 503
+            response.headers["Retry-After"] = "1"
+            return response
+
+        named_images: list[tuple[str, Image.Image]] = []
+        stored_image_paths: list[str] = []
+        upload_batch_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
         try:
-            with ocr_slots:
-                predictions, ocr_meta = service.predict_images(
-                    named_images=named_images,
-                    decode_mode=decode_mode,
-                    beam_width=beam_width,
-                    top_k=top_k,
-                    preprocess=preprocess,
-                    ocr_engine=ocr_engine,
-                    ocr_languages=ocr_languages,
-                )
+            for index, filename, raw_bytes in prepared_images:
+                try:
+                    with Image.open(io.BytesIO(raw_bytes)) as source_image:
+                        source_image.load()
+                        image = source_image.convert("RGB")
+                    named_images.append((filename, image))
+                    try:
+                        stored_path = save_uploaded_image(
+                            user_id=int(user["id"]),
+                            filename=filename,
+                            raw_bytes=raw_bytes,
+                            batch_id=upload_batch_id,
+                            index=index,
+                        )
+                    except Exception:
+                        stored_path = ""
+                    stored_image_paths.append(stored_path)
+                except Exception:
+                    rejected.append(filename)
+
+            if not named_images:
+                message = "No valid image files found. Use PNG/JPG/JPEG/BMP/TIF/TIFF."
+                return jsonify({"ok": False, "error": message, "rejected": rejected}), 400
+
+            predictions, ocr_meta = service.predict_images(
+                named_images=named_images,
+                decode_mode=decode_mode,
+                beam_width=beam_width,
+                top_k=top_k,
+                preprocess=preprocess,
+                ocr_engine=ocr_engine,
+                ocr_languages=ocr_languages,
+            )
         except FileNotFoundError as exc:
             for stored_path in stored_image_paths:
                 delete_upload(stored_path)
@@ -984,6 +1125,22 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             for stored_path in stored_image_paths:
                 delete_upload(stored_path)
             return jsonify({"ok": False, "error": f"Prediction failed: {exc}"}), 500
+        finally:
+            for _, image in named_images:
+                image.close()
+            ocr_slots.release()
+
+        try:
+            for item in predictions:
+                item["confidence"] = validate_confidence(item.get("confidence") or 0.0)
+                for alternative in item.get("alternatives") or []:
+                    if isinstance(alternative, dict):
+                        alternative["confidence"] = validate_confidence(alternative.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            for stored_path in stored_image_paths:
+                delete_upload(stored_path)
+            app.logger.error("Recognition engine returned an invalid confidence value")
+            return jsonify({"ok": False, "error": "Recognition returned invalid confidence data."}), 500
 
         db = get_db()
         filters_json = json.dumps(
@@ -1097,9 +1254,9 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             if not isinstance(item, dict):
                 continue
             try:
-                confidence = float(item.get("confidence") or 0.0)
+                confidence = validate_confidence(item.get("confidence") or 0.0)
             except (TypeError, ValueError):
-                confidence = 0.0
+                return jsonify({"ok": False, "error": "Invalid confidence value in results."}), 400
 
             alternatives = item.get("alternatives") or []
             if not isinstance(alternatives, list):
@@ -1110,9 +1267,9 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 if not isinstance(alt, dict):
                     continue
                 try:
-                    alt_conf = float(alt.get("confidence") or 0.0)
+                    alt_conf = validate_confidence(alt.get("confidence") or 0.0)
                 except (TypeError, ValueError):
-                    alt_conf = 0.0
+                    return jsonify({"ok": False, "error": "Invalid alternative confidence value."}), 400
                 alt_texts.append(f"{clean_text(alt.get('text'), fallback='(blank)', max_len=40)} ({round(alt_conf * 100)}%)")
 
             prepared_rows.append(
@@ -1532,7 +1689,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             params.append((payload.get("prediction") or "").strip())
         if "confidence" in payload:
             try:
-                confidence = float(payload.get("confidence"))
+                confidence = validate_confidence(payload.get("confidence"))
             except (TypeError, ValueError):
                 return jsonify({"ok": False, "error": "Invalid confidence value"}), 400
             updates.append("confidence = ?")
@@ -1928,6 +2085,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
 
         updates = []
         params: list[object] = []
+        password_changed = False
 
         if "username" in payload:
             username = normalize_username(payload.get("username") or "")
@@ -1959,6 +2117,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 return jsonify({"ok": False, "error": "Password must be at least 6 characters"}), 400
             updates.append("password_hash = ?")
             params.append(generate_password_hash(password))
+            password_changed = True
 
         if not updates:
             return jsonify({"ok": False, "error": "No updatable fields provided"}), 400
@@ -1967,6 +2126,17 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
 
         try:
             db.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
+            if password_changed:
+                db.execute(
+                    """
+                    UPDATE user_sessions
+                    SET is_active = 0,
+                        logout_at = CURRENT_TIMESTAMP,
+                        last_seen = CURRENT_TIMESTAMP
+                    WHERE user_id = ? AND is_active = 1
+                    """,
+                    (user_id,),
+                )
             current_admin = session_user()
             activity_id = 0
             if current_admin is not None and current_admin["role"] == "admin":
@@ -1981,10 +2151,13 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                         f"fields: {', '.join(changed_fields)}"
                     ),
                 )
-            changed_rows = [("users", user_id)]
-            if activity_id:
-                changed_rows.append(("admin_activity_logs", activity_id))
-            commit_and_sync(changed_rows=changed_rows)
+            if password_changed:
+                commit_and_sync("users", "user_sessions", "admin_activity_logs")
+            else:
+                changed_rows = [("users", user_id)]
+                if activity_id:
+                    changed_rows.append(("admin_activity_logs", activity_id))
+                commit_and_sync(changed_rows=changed_rows)
         except sqlite3.IntegrityError:
             return jsonify({"ok": False, "error": "Username already exists"}), 400
 
@@ -2080,9 +2253,10 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         rows = db.execute(
             """
             SELECT l.id, l.action, l.target_type, l.target_id, l.details, l.ip_address, l.created_at,
-                   u.username AS admin_username, u.full_name AS admin_full_name
+                   l.admin_user_id,
+                   l.admin_username,
+                   l.admin_full_name
             FROM admin_activity_logs l
-            JOIN users u ON u.id = l.admin_user_id
             ORDER BY l.created_at DESC, l.id DESC
             LIMIT ?
             """,
