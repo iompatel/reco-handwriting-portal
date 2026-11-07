@@ -11,6 +11,7 @@ import sqlite3
 import tempfile
 import threading
 import time
+import urllib.request
 import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -93,6 +94,46 @@ def csv_safe(value: object) -> object:
     if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
         return "'" + value
     return value
+
+
+def keep_alive_target() -> tuple[str, int] | None:
+    """Resolve the self-ping URL/interval, or None when keep-alive is disabled."""
+    if not parse_bool(os.getenv("KEEP_ALIVE_ENABLED"), default=True):
+        return None
+    base = (os.getenv("KEEP_ALIVE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
+    if not base:
+        return None
+    url = base if base.endswith("/api/health") else f"{base}/api/health"
+    interval = clamp_int(
+        os.getenv("KEEP_ALIVE_INTERVAL_SECONDS"),
+        default=240,
+        min_value=60,
+        max_value=3600,
+    )
+    return url, interval
+
+
+def start_keep_alive(app: Flask) -> threading.Thread | None:
+    """Ping our own public URL so an idle host never puts the service to sleep."""
+    target = keep_alive_target()
+    if target is None:
+        return None
+    url, interval = target
+
+    def loop() -> None:
+        while True:
+            time.sleep(interval)
+            ping = urllib.request.Request(url, headers={"User-Agent": "reco-keep-alive/1.0"})
+            try:
+                with urllib.request.urlopen(ping, timeout=30) as response:
+                    response.read(1)
+            except Exception as exc:  # noqa: BLE001
+                app.logger.warning("Keep-alive ping failed: %s", exc)
+
+    thread = threading.Thread(target=loop, name="keep-alive", daemon=True)
+    thread.start()
+    app.logger.info("Keep-alive bot pinging %s every %ss", url, interval)
+    return thread
 
 
 def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
@@ -2195,6 +2236,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             download_name=filename,
         )
 
+    start_keep_alive(app)
     return app
 
 

@@ -223,6 +223,16 @@ This repo already contains `render.yaml` with a persistent disk + Firebase env p
      - `"firebase_data_sync_configured": true`
      - `"firebase_data_sync_enabled": true`
 
+### Keep-alive bot
+
+The backend pings its own `/api/health` every 4 minutes so a host that idles services after 5 minutes never puts it to sleep. On Render it needs no configuration: `RENDER_EXTERNAL_URL` is picked up automatically.
+
+- `KEEP_ALIVE_ENABLED=false` disables the bot.
+- `KEEP_ALIVE_URL` overrides the public URL (default: `RENDER_EXTERNAL_URL`).
+- `KEEP_ALIVE_INTERVAL_SECONDS` changes the ping interval (60–3600, default `240`).
+
+The bot keeps a running service awake; if the service is already asleep, only an outside request can wake it. Keep an external uptime monitor as a backup if the instance must never cold-start.
+
 ## High-Accuracy Training (Public + Local + History)
 
 Recognition can be improved a lot with larger, diverse data, but **100% error-free OCR for every handwriting/language is not realistic**.

@@ -18,7 +18,7 @@ os.environ["FIREBASE_DATA_SYNC_ENABLED"] = "false"
 os.environ["OCR_DB_PATH"] = str(Path(TEST_ROOT) / "import.db")
 os.environ["OCR_UPLOAD_DIR"] = str(Path(TEST_ROOT) / "uploads")
 
-from app import create_app, csv_safe  # noqa: E402
+from app import create_app, csv_safe, keep_alive_target  # noqa: E402
 from src.database import init_db  # noqa: E402
 
 
@@ -204,6 +204,45 @@ class PortalTestCase(unittest.TestCase):
         finally:
             conn.close()
         self.assertIn("firebase_uid", columns)
+
+
+class KeepAliveTests(unittest.TestCase):
+    def test_uses_render_external_url_by_default(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "KEEP_ALIVE_ENABLED": "true",
+                "KEEP_ALIVE_URL": "",
+                "RENDER_EXTERNAL_URL": "https://portal.onrender.com/",
+            },
+        ):
+            self.assertEqual(
+                keep_alive_target(),
+                ("https://portal.onrender.com/api/health", 240),
+            )
+
+    def test_explicit_url_wins_and_interval_clamps(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "KEEP_ALIVE_URL": "https://example.test/api/health",
+                "KEEP_ALIVE_INTERVAL_SECONDS": "1",
+                "RENDER_EXTERNAL_URL": "https://ignored.test",
+            },
+        ):
+            self.assertEqual(
+                keep_alive_target(),
+                ("https://example.test/api/health", 60),
+            )
+
+    def test_disabled_or_unconfigured(self):
+        with mock.patch.dict(os.environ, {"KEEP_ALIVE_ENABLED": "false"}):
+            self.assertIsNone(keep_alive_target())
+        with mock.patch.dict(
+            os.environ,
+            {"KEEP_ALIVE_ENABLED": "true", "KEEP_ALIVE_URL": "", "RENDER_EXTERNAL_URL": ""},
+        ):
+            self.assertIsNone(keep_alive_target())
 
 
 if __name__ == "__main__":
