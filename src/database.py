@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
+import secrets
 import sqlite3
 from pathlib import Path
 
 from werkzeug.security import generate_password_hash
+
+logger = logging.getLogger(__name__)
 
 
 def connect_db(db_path: str | Path) -> sqlite3.Connection:
@@ -111,11 +115,10 @@ def init_db(db_path: str | Path, initial_admin_password: str | None = None) -> N
     ).fetchone()
     if not admin_exists:
         password = (initial_admin_password or os.getenv("ADMIN_INITIAL_PASSWORD") or "").strip()
-        if len(password) < 8:
-            conn.close()
-            raise RuntimeError(
-                "No admin account exists. Set ADMIN_INITIAL_PASSWORD (at least 8 characters) before first startup."
-            )
+        generated_password = len(password) < 8
+        if generated_password:
+            # Never fall back to a default credential; a one-time random password keeps first boot alive.
+            password = secrets.token_urlsafe(12)
         admin_username = (os.getenv("ADMIN_USERNAME") or "admin").strip() or "admin"
         conn.execute(
             """
@@ -124,6 +127,13 @@ def init_db(db_path: str | Path, initial_admin_password: str | None = None) -> N
             """,
             (admin_username, "System Admin", generate_password_hash(password)),
         )
+        if generated_password:
+            logger.warning(
+                "No ADMIN_INITIAL_PASSWORD set; created admin %r with one-time password: %s "
+                "(change it after first login).",
+                admin_username,
+                password,
+            )
 
     conn.commit()
     conn.close()

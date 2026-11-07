@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import sqlite3
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
 from unittest import mock
+
+from werkzeug.security import check_password_hash
 
 TEST_ROOT = tempfile.mkdtemp(prefix="reco-tests-")
 os.environ["ADMIN_INITIAL_PASSWORD"] = "test-admin-password"
@@ -170,10 +173,24 @@ class PortalTestCase(unittest.TestCase):
         self.assertIn("'=HYPERLINK", history_csv)
         response.close()
 
-    def test_first_start_requires_an_admin_password(self):
+    def test_first_start_generates_a_random_admin_password(self):
+        path = Path(TEST_ROOT) / "no-admin.db"
         with mock.patch.dict(os.environ, {"ADMIN_INITIAL_PASSWORD": ""}):
-            with self.assertRaises(RuntimeError):
-                init_db(Path(TEST_ROOT) / "no-admin.db")
+            with self.assertLogs("src.database", level="WARNING") as captured:
+                init_db(path)
+
+        match = re.search(r"one-time password: (\S+)", "\n".join(captured.output))
+        self.assertIsNotNone(match)
+        password = match.group(1)
+        self.assertGreaterEqual(len(password), 12)
+        self.assertNotEqual(password, "admin123")
+
+        conn = sqlite3.connect(path)
+        try:
+            row = conn.execute("SELECT password_hash FROM users WHERE username = 'admin'").fetchone()
+        finally:
+            conn.close()
+        self.assertTrue(check_password_hash(row[0], password))
 
     def test_legacy_database_migrates_firebase_uid(self):
         path = Path(TEST_ROOT) / "legacy.db"

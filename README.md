@@ -199,7 +199,7 @@ This repo already contains `render.yaml` with a persistent disk + Firebase env p
 1. Push this project to GitHub.
 2. In Render Dashboard, choose **New -> Blueprint** and connect the repo.
 3. While creating service, set these required env vars:
-   - `ADMIN_INITIAL_PASSWORD` (at least 8 characters; only used to create the first admin)
+   - `ADMIN_INITIAL_PASSWORD` (optional, at least 8 characters; Render generates one when the blueprint is used. If it is missing, the app creates the first admin with a random one-time password and prints it in the deploy log.)
    - `FIREBASE_SERVICE_ACCOUNT_JSON` (full service-account JSON string)
    - `FIREBASE_WEB_API_KEY`
    - `FIREBASE_WEB_AUTH_DOMAIN`
