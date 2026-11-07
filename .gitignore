@@ -18,3 +18,7 @@ tmp/
 
 # Local logs
 *.log
+
+# Firebase CLI state
+.firebase/
+firebase-debug.log*
