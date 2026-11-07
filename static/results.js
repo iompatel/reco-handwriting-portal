@@ -107,6 +107,7 @@ async function logoutAndRedirect() {
   try {
     await apiFetch("/api/auth/logout", { method: "POST" });
   } finally {
+    sessionStorage.removeItem(RESULT_CACHE_KEY);
     window.location.href = "/login";
   }
 }
@@ -272,6 +273,10 @@ function loadCachedResults() {
     const raw = sessionStorage.getItem(RESULT_CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
+    if (!parsed?.user_id || parsed.user_id !== state.user?.id) {
+      sessionStorage.removeItem(RESULT_CACHE_KEY);
+      return null;
+    }
     return parsed?.payload || null;
   } catch {
     return null;

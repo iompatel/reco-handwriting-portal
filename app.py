@@ -6,7 +6,12 @@ import io
 import json
 import os
 import secrets
+import shutil
 import sqlite3
+import tempfile
+import threading
+import time
+import urllib.request
 import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -84,12 +89,90 @@ def safe_filename_part(value: str | None, fallback: str = "user") -> str:
     return cleaned or fallback
 
 
+def csv_safe(value: object) -> object:
+    """Stop spreadsheet formula execution from user-supplied cells."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
+def keep_alive_target() -> tuple[str, int] | None:
+    """Resolve the self-ping URL/interval, or None when keep-alive is disabled."""
+    if not parse_bool(os.getenv("KEEP_ALIVE_ENABLED"), default=True):
+        return None
+    base = (os.getenv("KEEP_ALIVE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
+    if not base:
+        return None
+    url = base if base.endswith("/api/health") else f"{base}/api/health"
+    interval = clamp_int(
+        os.getenv("KEEP_ALIVE_INTERVAL_SECONDS"),
+        default=240,
+        min_value=60,
+        max_value=3600,
+    )
+    return url, interval
+
+
+def start_keep_alive(app: Flask) -> threading.Thread | None:
+    """Ping our own public URL so an idle host never puts the service to sleep."""
+    target = keep_alive_target()
+    if target is None:
+        return None
+    url, interval = target
+
+    def loop() -> None:
+        while True:
+            time.sleep(interval)
+            ping = urllib.request.Request(url, headers={"User-Agent": "reco-keep-alive/1.0"})
+            try:
+                with urllib.request.urlopen(ping, timeout=30) as response:
+                    response.read(1)
+            except Exception as exc:  # noqa: BLE001
+                app.logger.warning("Keep-alive ping failed: %s", exc)
+
+    thread = threading.Thread(target=loop, name="keep-alive", daemon=True)
+    thread.start()
+    app.logger.info("Keep-alive bot pinging %s every %ss", url, interval)
+    return thread
+
+
 def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
     app = Flask(__name__)
-    app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024
+    app.config["MAX_CONTENT_LENGTH"] = clamp_int(
+        os.getenv("OCR_MAX_REQUEST_BYTES"), default=25 * 1024 * 1024, min_value=1024 * 1024, max_value=200 * 1024 * 1024
+    )
     app.config["DB_PATH"] = db_path
     app.config["UPLOAD_ROOT"] = os.getenv("OCR_UPLOAD_DIR", "data/uploads")
-    app.secret_key = os.getenv("FLASK_SECRET_KEY", "change-me-in-production")
+    # Random per-process fallback keeps forged cookies out; set FLASK_SECRET_KEY to keep sessions across restarts.
+    app.secret_key = os.getenv("FLASK_SECRET_KEY") or secrets.token_hex(32)
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SECURE"] = parse_bool(os.getenv("SESSION_COOKIE_SECURE"), default=False)
+
+    max_files_per_request = clamp_int(os.getenv("OCR_MAX_FILES"), default=20, min_value=1, max_value=100)
+    max_file_bytes = clamp_int(
+        os.getenv("OCR_MAX_FILE_BYTES"), default=8 * 1024 * 1024, min_value=1024 * 1024, max_value=100 * 1024 * 1024
+    )
+    max_image_pixels = clamp_int(
+        os.getenv("OCR_MAX_IMAGE_PIXELS"), default=40_000_000, min_value=1_000_000, max_value=200_000_000
+    )
+    Image.MAX_IMAGE_PIXELS = max_image_pixels
+    ocr_slots = threading.BoundedSemaphore(
+        clamp_int(os.getenv("OCR_MAX_CONCURRENCY"), default=2, min_value=1, max_value=16)
+    )
+    predict_attempts: dict[int, list[float]] = {}
+    predict_attempts_lock = threading.Lock()
+
+    def predict_rate_limited(user_id: int) -> bool:
+        now = time.monotonic()
+        with predict_attempts_lock:
+            attempts = [stamp for stamp in predict_attempts.get(user_id, []) if now - stamp < 60]
+            if len(attempts) >= 10:
+                predict_attempts[user_id] = attempts
+                return True
+            attempts.append(now)
+            predict_attempts[user_id] = attempts
+        return False
 
     service = InferenceService(checkpoint_path=Path(checkpoint), device_name=device)
     init_db(db_path)
@@ -118,6 +201,26 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         target.write_bytes(raw_bytes)
         relative = target.relative_to(upload_root).as_posix()
         return relative
+
+    def delete_upload(relative_path: str | None) -> None:
+        relative = (relative_path or "").strip()
+        if not relative:
+            return
+        upload_root = Path(app.config["UPLOAD_ROOT"]).resolve()
+        target = (upload_root / relative).resolve()
+        try:
+            target.relative_to(upload_root)
+        except ValueError:
+            return
+        try:
+            target.unlink(missing_ok=True)
+        except OSError:
+            app.logger.warning("Could not remove upload file: %s", target)
+
+    def send_temp_file(file_obj, **kwargs):
+        response = send_file(file_obj, **kwargs)
+        response.call_on_close(file_obj.close)
+        return response
 
     def firebase_web_config_from_env() -> dict[str, str]:
         config = {
@@ -189,13 +292,21 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         if db is not None:
             db.close()
 
-    def commit_and_sync(*tables: str, min_interval_seconds: int = 0, force: bool = False) -> None:
+    def commit_and_sync(
+        *tables: str,
+        changed_rows: list[tuple[str, int]] | None = None,
+        min_interval_seconds: int = 0,
+        force: bool = False,
+    ) -> None:
         db = get_db()
         db.commit()
         if not firebase_data_sync.enabled:
             return
-        target_tables = tables if tables else FIREBASE_SYNC_TABLES
         try:
+            if changed_rows:
+                firebase_data_sync.sync_rows(db, changed_rows, force=force)
+                return
+            target_tables = tables if tables else FIREBASE_SYNC_TABLES
             firebase_data_sync.sync_tables(
                 db,
                 target_tables,
@@ -266,9 +377,9 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         target_type: str = "",
         target_id: str = "",
         details: str = "",
-    ) -> None:
+    ) -> int:
         db = get_db()
-        db.execute(
+        cur = db.execute(
             """
             INSERT INTO admin_activity_logs
                 (admin_user_id, action, target_type, target_id, details, ip_address, created_at)
@@ -283,6 +394,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 client_ip_address(),
             ),
         )
+        return int(cur.lastrowid or 0)
 
     def log_admin_activity(
         action: str,
@@ -334,14 +446,22 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             (int(user["id"]),),
         )
         if user["role"] == "admin":
-            insert_admin_activity(
+            activity_id = insert_admin_activity(
                 admin_user_id=int(user["id"]),
                 action="LOGIN",
                 target_type="auth",
                 target_id=str(int(user["id"])),
                 details="Admin logged in successfully",
             )
-        commit_and_sync("users", "user_sessions", "admin_activity_logs")
+        else:
+            activity_id = 0
+        changed_rows = [
+            ("users", int(user["id"])),
+            ("user_sessions", int(cur.lastrowid)),
+        ]
+        if activity_id:
+            changed_rows.append(("admin_activity_logs", activity_id))
+        commit_and_sync(changed_rows=changed_rows)
 
         session["user_id"] = int(user["id"])
         session["role"] = user["role"]
@@ -390,7 +510,8 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 """,
                 (session_record_id,),
             )
-            commit_and_sync("user_sessions", min_interval_seconds=60)
+            # Touch locally only; Firestore gets the session row on login/logout.
+            db.commit()
 
     @app.get("/login")
     def login_page():
@@ -457,44 +578,18 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
 
         db = get_db()
         try:
-            db.execute(
+            cur = db.execute(
                 """
                 INSERT INTO users (username, full_name, password_hash, role)
                 VALUES (?, ?, ?, 'user')
                 """,
                 (username, full_name, generate_password_hash(password)),
             )
-            commit_and_sync("users")
+            commit_and_sync(changed_rows=[("users", int(cur.lastrowid))])
         except sqlite3.IntegrityError:
             return jsonify({"ok": False, "error": "Username already exists"}), 400
 
         return jsonify({"ok": True, "message": "Account created. Please login."})
-
-    @app.post("/api/auth/reset-password")
-    def reset_password():
-        payload = request.get_json(silent=True) or {}
-        username = normalize_username(payload.get("username", ""))
-        new_password = payload.get("new_password") or ""
-
-        if len(username) < 3:
-            return jsonify({"ok": False, "error": "Username must be at least 3 characters"}), 400
-        if len(new_password) < 6:
-            return jsonify({"ok": False, "error": "New password must be at least 6 characters"}), 400
-
-        db = get_db()
-        user = db.execute(
-            "SELECT id FROM users WHERE username = ?",
-            (username,),
-        ).fetchone()
-        if user is None:
-            return jsonify({"ok": False, "error": "Invalid username"}), 404
-
-        db.execute(
-            "UPDATE users SET password_hash = ? WHERE id = ?",
-            (generate_password_hash(new_password), int(user["id"])),
-        )
-        commit_and_sync("users")
-        return jsonify({"ok": True, "message": "Password updated successfully"})
 
     @app.post("/api/auth/login")
     def login():
@@ -546,22 +641,39 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
 
         full_name = (decoded_token.get("name") or "").strip() or username.split("@", 1)[0]
         firebase_uid = (decoded_token.get("uid") or "").strip()
+        if not firebase_uid:
+            return jsonify({"ok": False, "error": "Google account identifier not available"}), 400
 
         db = get_db()
         user = db.execute(
-            "SELECT id, username, full_name, role, avatar_path FROM users WHERE username = ?",
-            (username,),
+            "SELECT id, username, full_name, role, avatar_path FROM users WHERE firebase_uid = ?",
+            (firebase_uid,),
         ).fetchone()
 
         if user is None:
-            password_seed = f"firebase::{firebase_uid}::{secrets.token_urlsafe(18)}"
+            # Never attach a Google identity to an existing password account by email alone.
+            existing = db.execute(
+                "SELECT id FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
+            if existing is not None:
+                return (
+                    jsonify(
+                        {
+                            "ok": False,
+                            "error": "An account with this email already exists. Sign in with your password instead.",
+                        }
+                    ),
+                    409,
+                )
+
             try:
                 cur = db.execute(
                     """
-                    INSERT INTO users (username, full_name, password_hash, role)
-                    VALUES (?, ?, ?, 'user')
+                    INSERT INTO users (username, full_name, password_hash, firebase_uid, role)
+                    VALUES (?, ?, ?, ?, 'user')
                     """,
-                    (username, full_name, generate_password_hash(password_seed)),
+                    (username, full_name, generate_password_hash(secrets.token_urlsafe(32)), firebase_uid),
                 )
                 user = db.execute(
                     "SELECT id, username, full_name, role, avatar_path FROM users WHERE id = ?",
@@ -569,8 +681,8 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 ).fetchone()
             except sqlite3.IntegrityError:
                 user = db.execute(
-                    "SELECT id, username, full_name, role, avatar_path FROM users WHERE username = ?",
-                    (username,),
+                    "SELECT id, username, full_name, role, avatar_path FROM users WHERE firebase_uid = ?",
+                    (firebase_uid,),
                 ).fetchone()
 
         if user is None:
@@ -615,16 +727,23 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             )
 
         if is_admin and user is not None:
-            insert_admin_activity(
+            activity_id = insert_admin_activity(
                 admin_user_id=int(user["id"]),
                 action="LOGOUT",
                 target_type="auth",
                 target_id=str(int(user["id"])),
                 details="Admin logged out",
             )
+        else:
+            activity_id = 0
 
         if db is not None:
-            commit_and_sync("user_sessions", "admin_activity_logs")
+            changed_rows = []
+            if session_record_id:
+                changed_rows.append(("user_sessions", int(session_record_id)))
+            if activity_id:
+                changed_rows.append(("admin_activity_logs", int(activity_id)))
+            commit_and_sync(changed_rows=changed_rows or None)
 
         session.clear()
         return jsonify({"ok": True})
@@ -719,7 +838,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             "UPDATE users SET avatar_path = ? WHERE id = ?",
             (relative_path, int(user["id"])),
         )
-        commit_and_sync("users")
+        commit_and_sync(changed_rows=[("users", int(user["id"]))])
         g.pop("session_user", None)
 
         if old_avatar:
@@ -760,8 +879,20 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
     def predict():
         user = session_user()
         files = request.files.getlist("images")
+        if predict_rate_limited(int(user["id"])):
+            return jsonify({"ok": False, "error": "Too many OCR requests. Wait a minute and try again."}), 429
         if not files:
             return jsonify({"ok": False, "error": "Upload at least one image."}), 400
+        if len(files) > max_files_per_request:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": f"Too many files. Upload at most {max_files_per_request} images per request.",
+                    }
+                ),
+                400,
+            )
 
         decode_mode = (request.form.get("decode_mode") or "beam").strip().lower()
         if decode_mode not in {"beam", "greedy"}:
@@ -789,6 +920,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
 
         named_images: list[tuple[str, Image.Image]] = []
         stored_image_paths: list[str] = []
+        history_ids: list[int] = []
         rejected: list[str] = []
         upload_batch_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
 
@@ -803,8 +935,13 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 raw_bytes = file.read()
                 if not raw_bytes:
                     raise ValueError("Empty file")
+                if len(raw_bytes) > max_file_bytes:
+                    raise ValueError("File too large")
 
-                image = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+                image = Image.open(io.BytesIO(raw_bytes))
+                if image.width * image.height > max_image_pixels:
+                    raise ValueError("Image dimensions too large")
+                image = image.convert("RGB")
                 named_images.append((filename, image))
                 try:
                     stored_path = save_uploaded_image(
@@ -825,20 +962,27 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             return jsonify({"ok": False, "error": message, "rejected": rejected}), 400
 
         try:
-            predictions, ocr_meta = service.predict_images(
-                named_images=named_images,
-                decode_mode=decode_mode,
-                beam_width=beam_width,
-                top_k=top_k,
-                preprocess=preprocess,
-                ocr_engine=ocr_engine,
-                ocr_languages=ocr_languages,
-            )
+            with ocr_slots:
+                predictions, ocr_meta = service.predict_images(
+                    named_images=named_images,
+                    decode_mode=decode_mode,
+                    beam_width=beam_width,
+                    top_k=top_k,
+                    preprocess=preprocess,
+                    ocr_engine=ocr_engine,
+                    ocr_languages=ocr_languages,
+                )
         except FileNotFoundError as exc:
+            for stored_path in stored_image_paths:
+                delete_upload(stored_path)
             return jsonify({"ok": False, "error": str(exc)}), 400
         except RuntimeError as exc:
+            for stored_path in stored_image_paths:
+                delete_upload(stored_path)
             return jsonify({"ok": False, "error": str(exc)}), 500
         except Exception as exc:
+            for stored_path in stored_image_paths:
+                delete_upload(stored_path)
             return jsonify({"ok": False, "error": f"Prediction failed: {exc}"}), 500
 
         db = get_db()
@@ -850,24 +994,33 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 "ocr_languages_used": ocr_meta.get("ocr_languages_used", []),
             }
         )
-        for pred_index, item in enumerate(predictions):
-            db.execute(
-                """
-                INSERT INTO detection_history
-                    (user_id, file_name, prediction, confidence, source, filters_json, image_path, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """,
-                (
-                    int(user["id"]),
-                    item.get("file") or "unknown",
-                    item.get("prediction") or "",
-                    float(item.get("confidence") or 0.0),
-                    item.get("source") or "rnn",
-                    filters_json,
-                    stored_image_paths[pred_index] if pred_index < len(stored_image_paths) else "",
-                ),
-            )
-        commit_and_sync("detection_history")
+        history_ids: list[int] = []
+        try:
+            for pred_index, item in enumerate(predictions):
+                cur = db.execute(
+                    """
+                    INSERT INTO detection_history
+                        (user_id, file_name, prediction, confidence, source, filters_json, image_path, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """,
+                    (
+                        int(user["id"]),
+                        item.get("file") or "unknown",
+                        item.get("prediction") or "",
+                        float(item.get("confidence") or 0.0),
+                        item.get("source") or "rnn",
+                        filters_json,
+                        stored_image_paths[pred_index] if pred_index < len(stored_image_paths) else "",
+                    ),
+                )
+                history_ids.append(int(cur.lastrowid))
+        except sqlite3.Error:
+            db.rollback()
+            for stored_path in stored_image_paths:
+                delete_upload(stored_path)
+            app.logger.exception("Failed to save prediction history")
+            return jsonify({"ok": False, "error": "Could not save recognition results."}), 500
+        commit_and_sync(changed_rows=[("detection_history", record_id) for record_id in history_ids])
 
         avg_conf = sum(item["confidence"] for item in predictions) / max(1, len(predictions))
         warnings = sorted(
@@ -974,7 +1127,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         if not prepared_rows:
             return jsonify({"ok": False, "error": "No valid results found for PDF export."}), 400
 
-        pdf_buffer = io.BytesIO()
+        pdf_buffer = tempfile.TemporaryFile()
         doc = SimpleDocTemplate(
             pdf_buffer,
             pagesize=A4,
@@ -1057,7 +1210,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         username_slug = safe_filename_part(str(user["username"]), fallback="user")
         filename = f"recognition_results_{username_slug}_{timestamp}.pdf"
-        return send_file(
+        return send_temp_file(
             pdf_buffer,
             mimetype="application/pdf",
             as_attachment=True,
@@ -1072,6 +1225,8 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         search_query = (request.args.get("search") or "").strip().lower()
         source_filter = (request.args.get("source") or "").strip().lower()
         is_admin_scope = user["role"] == "admin" and request.args.get("scope") == "all"
+        limit = clamp_int(request.args.get("limit"), default=200, min_value=1, max_value=1000)
+        offset = clamp_int(request.args.get("offset"), default=0, min_value=0, max_value=1_000_000)
 
         where_clauses: list[str] = []
         params: list[object] = []
@@ -1114,8 +1269,9 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             {base_from_sql}
             {where_sql}
             ORDER BY h.created_at DESC
+            LIMIT ? OFFSET ?
             """,
-            params,
+            [*params, limit, offset],
         ).fetchall()
 
         total_row = db.execute(
@@ -1128,7 +1284,15 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         ).fetchone()
         total = int(total_row["total"] or 0) if total_row is not None else len(rows)
 
-        return jsonify({"ok": True, "history": [dict(row) for row in rows], "total": total})
+        return jsonify(
+            {
+                "ok": True,
+                "history": [dict(row) for row in rows],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+        )
 
     @app.get("/api/history/<int:record_id>")
     @login_required_api
@@ -1237,7 +1401,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         confidence_pct = f"{round(float(row['confidence'] or 0.0) * 100)}%"
         prediction_text = clean_text(row["prediction"], fallback="(blank)", max_len=1200)
-        pdf_buffer = io.BytesIO()
+        pdf_buffer = tempfile.TemporaryFile()
 
         doc = SimpleDocTemplate(
             pdf_buffer,
@@ -1333,7 +1497,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 details=f"Exported history PDF for record {record_id}",
                 commit=True,
             )
-        return send_file(
+        return send_temp_file(
             pdf_buffer,
             mimetype="application/pdf",
             as_attachment=True,
@@ -1384,16 +1548,20 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             f"UPDATE detection_history SET {', '.join(updates)} WHERE id = ?",
             params,
         )
+        activity_id = 0
         if user["role"] == "admin":
             changed_fields = [field.split(" = ")[0] for field in updates if field != "updated_at = CURRENT_TIMESTAMP"]
-            insert_admin_activity(
+            activity_id = insert_admin_activity(
                 admin_user_id=int(user["id"]),
                 action="UPDATE_HISTORY",
                 target_type="history_record",
                 target_id=str(record_id),
                 details=f"Updated history record {record_id}; fields: {', '.join(changed_fields)}",
             )
-        commit_and_sync("detection_history", "admin_activity_logs")
+        changed_rows = [("detection_history", record_id)]
+        if activity_id:
+            changed_rows.append(("admin_activity_logs", activity_id))
+        commit_and_sync(changed_rows=changed_rows)
 
         updated = db.execute(
             """
@@ -1415,7 +1583,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         db = get_db()
 
         row = db.execute(
-            "SELECT id, user_id FROM detection_history WHERE id = ?",
+            "SELECT id, user_id, image_path FROM detection_history WHERE id = ?",
             (record_id,),
         ).fetchone()
         if row is None:
@@ -1425,15 +1593,20 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             return jsonify({"ok": False, "error": "Not allowed"}), 403
 
         db.execute("DELETE FROM detection_history WHERE id = ?", (record_id,))
+        activity_id = 0
         if user["role"] == "admin":
-            insert_admin_activity(
+            activity_id = insert_admin_activity(
                 admin_user_id=int(user["id"]),
                 action="DELETE_HISTORY",
                 target_type="history_record",
                 target_id=str(record_id),
                 details=f"Deleted history record {record_id}",
             )
-        commit_and_sync("detection_history", "admin_activity_logs")
+        changed_rows = [("detection_history", record_id)]
+        if activity_id:
+            changed_rows.append(("admin_activity_logs", activity_id))
+        commit_and_sync(changed_rows=changed_rows)
+        delete_upload(row["image_path"])
         return jsonify({"ok": True})
 
     @app.get("/api/admin/users")
@@ -1531,7 +1704,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         username = clean_text(user_row["username"], fallback=f"user_{user_id}")
         full_name = clean_text(user_row["full_name"], fallback=username)
         generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        pdf_buffer = io.BytesIO()
+        pdf_buffer = tempfile.TemporaryFile()
 
         doc = SimpleDocTemplate(
             pdf_buffer,
@@ -1692,7 +1865,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 details=f"Exported user PDF report for {username}",
                 commit=True,
             )
-        return send_file(
+        return send_temp_file(
             pdf_buffer,
             mimetype="application/pdf",
             as_attachment=True,
@@ -1725,15 +1898,20 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 """,
                 (username, full_name, generate_password_hash(password), role),
             )
+            new_user_id = int(cur.lastrowid)
+            activity_id = 0
             if current_admin is not None and current_admin["role"] == "admin":
-                insert_admin_activity(
+                activity_id = insert_admin_activity(
                     admin_user_id=int(current_admin["id"]),
                     action="CREATE_USER",
                     target_type="user",
-                    target_id=str(int(cur.lastrowid)),
+                    target_id=str(new_user_id),
                     details=f"Created {role} account: {username}",
                 )
-            commit_and_sync("users", "admin_activity_logs")
+            changed_rows = [("users", new_user_id)]
+            if activity_id:
+                changed_rows.append(("admin_activity_logs", activity_id))
+            commit_and_sync(changed_rows=changed_rows)
         except sqlite3.IntegrityError:
             return jsonify({"ok": False, "error": "Username already exists"}), 400
 
@@ -1744,7 +1922,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
     def admin_users_update(user_id: int):
         payload = request.get_json(silent=True) or {}
         db = get_db()
-        user_row = db.execute("SELECT id, username FROM users WHERE id = ?", (user_id,)).fetchone()
+        user_row = db.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,)).fetchone()
         if user_row is None:
             return jsonify({"ok": False, "error": "User not found"}), 404
 
@@ -1766,6 +1944,12 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             role = (payload.get("role") or "").strip().lower()
             if role not in {"admin", "user"}:
                 return jsonify({"ok": False, "error": "Role must be admin or user"}), 400
+            if user_row["role"] == "admin" and role != "admin":
+                admin_count = db.execute(
+                    "SELECT COUNT(*) AS total FROM users WHERE role = 'admin'"
+                ).fetchone()
+                if int(admin_count["total"] or 0) <= 1:
+                    return jsonify({"ok": False, "error": "Cannot remove the last admin account"}), 400
             updates.append("role = ?")
             params.append(role)
 
@@ -1784,9 +1968,10 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
         try:
             db.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
             current_admin = session_user()
+            activity_id = 0
             if current_admin is not None and current_admin["role"] == "admin":
                 changed_fields = [field.split(" = ")[0] for field in updates]
-                insert_admin_activity(
+                activity_id = insert_admin_activity(
                     admin_user_id=int(current_admin["id"]),
                     action="UPDATE_USER",
                     target_type="user",
@@ -1796,7 +1981,10 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                         f"fields: {', '.join(changed_fields)}"
                     ),
                 )
-            commit_and_sync("users", "admin_activity_logs")
+            changed_rows = [("users", user_id)]
+            if activity_id:
+                changed_rows.append(("admin_activity_logs", activity_id))
+            commit_and_sync(changed_rows=changed_rows)
         except sqlite3.IntegrityError:
             return jsonify({"ok": False, "error": "Username already exists"}), 400
 
@@ -1810,12 +1998,22 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             return jsonify({"ok": False, "error": "You cannot delete your own account"}), 400
 
         db = get_db()
-        row = db.execute("SELECT id, role, username FROM users WHERE id = ?", (user_id,)).fetchone()
+        row = db.execute(
+            "SELECT id, role, username, avatar_path FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
         if row is None:
             return jsonify({"ok": False, "error": "User not found"}), 404
         if row["role"] == "admin":
             return jsonify({"ok": False, "error": "Admin accounts cannot be deleted"}), 400
 
+        image_paths = [
+            str(item["image_path"] or "")
+            for item in db.execute(
+                "SELECT image_path FROM detection_history WHERE user_id = ?",
+                (user_id,),
+            ).fetchall()
+        ]
         db.execute("DELETE FROM users WHERE id = ?", (user_id,))
         insert_admin_activity(
             admin_user_id=int(user["id"]),
@@ -1824,7 +2022,12 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             target_id=str(user_id),
             details=f"Deleted user account: {row['username']}",
         )
-        commit_and_sync("users", "admin_activity_logs")
+        # Full reconcile so Firestore also drops the cascade-deleted sessions and history rows.
+        commit_and_sync()
+        for image_path in image_paths:
+            delete_upload(image_path)
+        delete_upload(row["avatar_path"])
+        shutil.rmtree(Path(app.config["UPLOAD_ROOT"]) / f"user_{user_id}", ignore_errors=True)
         return jsonify({"ok": True})
 
     @app.get("/api/admin/overview")
@@ -1930,7 +2133,7 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
             """
         ).fetchall()
 
-        buffer = io.BytesIO()
+        buffer = tempfile.TemporaryFile()
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
         with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as bundle:
@@ -1944,11 +2147,11 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 users_writer.writerow(
                     {
                         "id": int(row["id"]),
-                        "name": row["full_name"] or "",
-                        "email": row["username"] or "",
-                        "role": row["role"] or "",
-                        "created_at": row["created_at"] or "",
-                        "last_login": row["last_login"] or "",
+                        "name": csv_safe(row["full_name"] or ""),
+                        "email": csv_safe(row["username"] or ""),
+                        "role": csv_safe(row["role"] or ""),
+                        "created_at": csv_safe(row["created_at"] or ""),
+                        "last_login": csv_safe(row["last_login"] or ""),
                     }
                 )
             bundle.writestr("users.csv", users_csv.getvalue())
@@ -1987,15 +2190,15 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                     {
                         "record_id": int(row["id"]),
                         "user_id": int(row["user_id"]),
-                        "name": row["full_name"] or "",
-                        "email": row["username"] or "",
-                        "file_name": row["file_name"] or "",
-                        "prediction": row["prediction"] or "",
+                        "name": csv_safe(row["full_name"] or ""),
+                        "email": csv_safe(row["username"] or ""),
+                        "file_name": csv_safe(row["file_name"] or ""),
+                        "prediction": csv_safe(row["prediction"] or ""),
                         "confidence": row["confidence"] or 0.0,
-                        "source": row["source"] or "",
-                        "created_at": row["created_at"] or "",
-                        "updated_at": row["updated_at"] or "",
-                        "image_file": archive_image_path,
+                        "source": csv_safe(row["source"] or ""),
+                        "created_at": csv_safe(row["created_at"] or ""),
+                        "updated_at": csv_safe(row["updated_at"] or ""),
+                        "image_file": csv_safe(archive_image_path),
                     }
                 )
 
@@ -2026,13 +2229,14 @@ def create_app(checkpoint: str, device: str, db_path: str) -> Flask:
                 details=f"Exported all data bundle (users={len(users)}, history={len(history)})",
                 commit=True,
             )
-        return send_file(
+        return send_temp_file(
             buffer,
             mimetype="application/zip",
             as_attachment=True,
             download_name=filename,
         )
 
+    start_keep_alive(app)
     return app
 
 
@@ -2065,17 +2269,11 @@ def parse_args() -> argparse.Namespace:
 _default_checkpoint = os.getenv("OCR_CHECKPOINT", "checkpoints/fix2/best.pt")
 _default_device = os.getenv("OCR_DEVICE", "auto")
 _default_db_path = os.getenv("OCR_DB_PATH", "data/app.db")
-app = create_app(_default_checkpoint, _default_device, _default_db_path)
-
 
 if __name__ == "__main__":
     args = parse_args()
-    if (
-        args.checkpoint == _default_checkpoint
-        and args.device == _default_device
-        and args.db_path == _default_db_path
-    ):
-        runtime_app = app
-    else:
-        runtime_app = create_app(args.checkpoint, args.device, args.db_path)
+    # Build exactly one app for this process; importing the module builds the WSGI app instead.
+    runtime_app = create_app(args.checkpoint, args.device, args.db_path)
     runtime_app.run(host=args.host, port=args.port, debug=args.debug)
+else:
+    app = create_app(_default_checkpoint, _default_device, _default_db_path)

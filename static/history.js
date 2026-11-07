@@ -139,6 +139,7 @@ async function logoutAndRedirect() {
   try {
     await apiFetch("/api/auth/logout", { method: "POST" });
   } finally {
+    sessionStorage.removeItem("reco_latest_result_v1");
     window.location.href = "/login";
   }
 }
@@ -375,6 +376,7 @@ function updateHistoryFilterCount(filtered, total) {
 function buildHistoryEndpoint() {
   const isAdmin = state.user?.role === "admin";
   const params = new URLSearchParams();
+  params.set("limit", "1000");
 
   if (isAdmin) {
     params.set("scope", "all");

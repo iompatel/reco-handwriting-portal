@@ -27,6 +27,7 @@ FIREBASE_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "username",
         "full_name",
         "password_hash",
+        "firebase_uid",
         "role",
         "avatar_path",
         "created_at",
@@ -130,6 +131,7 @@ class FirebaseDataSync:
         defaults: dict[tuple[str, str], object] = {
             ("users", "full_name"): "",
             ("users", "password_hash"): "",
+            ("users", "firebase_uid"): "",
             ("users", "role"): "user",
             ("users", "avatar_path"): "",
             ("users", "created_at"): timestamp_now,
@@ -238,6 +240,49 @@ class FirebaseDataSync:
             self._disable_runtime_sync(f"{type(exc).__name__}: {exc}")
             return False
 
+    def sync_rows(
+        self,
+        db: sqlite3.Connection,
+        rows: Sequence[tuple[str, int]],
+        *,
+        force: bool = False,
+    ) -> bool:
+        """Push only the given (table, id) rows; a missing local row deletes its remote document."""
+        if self._client is None:
+            return False
+        if not self._enable_runtime_sync_if_due(force=force):
+            return False
+
+        try:
+            grouped: dict[str, set[str]] = {}
+            for table_name, row_id in rows:
+                self._validate_table_name(table_name)
+                grouped.setdefault(table_name, set()).add(str(int(row_id)))
+
+            for table_name, ids in grouped.items():
+                collection = self._client.collection(self._collection_name(table_name))
+                doc_ids = sorted(ids)
+                placeholders = ", ".join("?" for _ in doc_ids)
+                local_rows = {
+                    str(row["id"]): self._row_to_dict(row)
+                    for row in db.execute(
+                        f"SELECT * FROM {table_name} WHERE id IN ({placeholders})",
+                        doc_ids,
+                    ).fetchall()
+                }
+                batch = self._client.batch()
+                for doc_id in doc_ids:
+                    document = collection.document(doc_id)
+                    if doc_id in local_rows:
+                        batch.set(document, local_rows[doc_id])
+                    else:
+                        batch.delete(document)
+                batch.commit()
+            return True
+        except Exception as exc:
+            self._disable_runtime_sync(f"{type(exc).__name__}: {exc}")
+            return False
+
     def sync_tables(
         self,
         db: sqlite3.Connection,
@@ -321,6 +366,13 @@ class FirebaseDataSync:
                     "INSERT INTO sqlite_sequence(name, seq) VALUES(?, ?)",
                     (table_name, max_id),
                 )
+
+            violations = db.execute("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                raise RuntimeError(f"Firestore restore broke {len(violations)} foreign-key references")
+            admin_count = db.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()
+            if admin_count is None or int(admin_count[0] or 0) == 0:
+                raise RuntimeError("Firestore restore would leave the app without an admin account")
 
             db.commit()
             db.execute("PRAGMA foreign_keys = ON")

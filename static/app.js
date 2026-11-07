@@ -687,6 +687,7 @@ function cacheLatestResult(payload) {
       RESULT_CACHE_KEY,
       JSON.stringify({
         cached_at: Date.now(),
+        user_id: state.user?.id || null,
         payload,
       })
     );
@@ -780,6 +781,7 @@ async function logoutAndRedirect() {
   try {
     await apiFetch("/api/auth/logout", { method: "POST" });
   } finally {
+    sessionStorage.removeItem(RESULT_CACHE_KEY);
     window.location.href = "/login";
   }
 }
@@ -1532,7 +1534,6 @@ async function bootstrapUser() {
       }
       refs.topHistoryLink?.classList.add("hidden");
       startAdminDateTimeClock();
-      resolveAdminLocation();
     } else {
       refs.topHistoryLink?.classList.remove("hidden");
       stopAdminDateTimeClock();
@@ -1553,6 +1554,19 @@ function attachEvents() {
   });
 
   refs.profileLogoutBtn?.addEventListener("click", logoutAndRedirect);
+
+  refs.adminLiveLocation?.addEventListener("click", () => {
+    adminLiveState.locationResolved = false;
+    resolveAdminLocation();
+  });
+
+  refs.adminLiveLocation?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      adminLiveState.locationResolved = false;
+      resolveAdminLocation();
+    }
+  });
 
   refs.profileAvatarInput?.addEventListener("change", async (event) => {
     const file = event.target.files?.[0];

@@ -359,15 +359,15 @@ def main() -> None:
             "img_width": args.img_width,
             "img_height": args.img_height,
         }
-        save_checkpoint(checkpoint_dir / "last.pt", checkpoint_state)
-
         if val_metrics["cer"] < best_cer:
             best_cer = val_metrics["cer"]
             stale_epochs = 0
             checkpoint_state["best_cer"] = best_cer
+            save_checkpoint(checkpoint_dir / "last.pt", checkpoint_state)
             save_checkpoint(checkpoint_dir / "best.pt", checkpoint_state)
             print(f"Saved new best model with CER={best_cer:.4f}")
         else:
+            save_checkpoint(checkpoint_dir / "last.pt", checkpoint_state)
             stale_epochs += 1
             if stale_epochs >= args.patience:
                 print(f"Early stopping at epoch {epoch} (no CER improvement for {args.patience} epochs)")

@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // The app reads and writes through the Firebase Admin SDK, which bypasses these rules.
+    // No browser or anonymous client should touch this database directly.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

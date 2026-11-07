@@ -18,5 +18,5 @@ RUN grep -vE '^(torch|torchvision)' requirements.txt > /tmp/requirements.deploy.
 
 COPY . .
 
-# Render provides PORT automatically.
-CMD sh -c "python app.py --host 0.0.0.0 --port ${PORT:-5000} --db-path ${OCR_DB_PATH:-/var/data/app.db} --checkpoint ${OCR_CHECKPOINT:-checkpoints/fix2/best.pt}"
+# Render provides PORT automatically. Gunicorn keeps the dev server out of production.
+CMD sh -c "OCR_CHECKPOINT=${OCR_CHECKPOINT:-checkpoints/fix2/best.pt} OCR_DB_PATH=${OCR_DB_PATH:-/var/data/app.db} OCR_UPLOAD_DIR=${OCR_UPLOAD_DIR:-/var/data/uploads} gunicorn --bind 0.0.0.0:${PORT:-5000} --worker-class gthread --workers 1 --threads 4 --timeout 300 app:app"

@@ -40,7 +40,6 @@ SCREENSHOTS = [
             ("Show/Hide password toggle", "data-toggle-password"),
             ("Login button", "login-form submit"),
             ("Create Account link", "show-register"),
-            ("Forgot Password link", "show-reset"),
         ],
         "data_note": "Sample input filled with existing user credentials.",
     },
@@ -59,21 +58,7 @@ SCREENSHOTS = [
         "data_note": "Demo registration data shown for form validation and flow explanation.",
     },
     {
-        "title": "Screen 3: Reset Password Page",
-        "file": ROOT / "output" / "playwright" / "doc_03_reset_password.png",
-        "navigation": "Login page -> click Forgot Password? -> fill reset details.",
-        "widgets": [
-            ("Username input", "reset-username"),
-            ("New password input", "reset-new-password"),
-            ("Confirm password input", "reset-confirm"),
-            ("Reset Password button", "reset-form submit"),
-            ("Back to Login link", "show-login-from-reset"),
-            ("Create Account link", "show-register-from-reset"),
-        ],
-        "data_note": "Existing user ID and new password fields are filled for practical demo.",
-    },
-    {
-        "title": "Screen 4: User Dashboard",
+        "title": "Screen 3: User Dashboard",
         "file": ROOT / "output" / "playwright" / "doc_04_user_dashboard.png",
         "navigation": "Login as user -> upload image -> keep filters set -> click Recognize Text.",
         "widgets": [
@@ -87,7 +72,7 @@ SCREENSHOTS = [
         "data_note": "Notebook image is uploaded with active preprocessing filters.",
     },
     {
-        "title": "Screen 5: User Recognition Results",
+        "title": "Screen 4: User Recognition Results",
         "file": ROOT / "output" / "playwright" / "doc_05_user_results.png",
         "navigation": "After recognition, portal redirects to /results automatically.",
         "widgets": [
@@ -101,7 +86,7 @@ SCREENSHOTS = [
         "data_note": "Sample OCR output and confidence are shown from uploaded handwritten image.",
     },
     {
-        "title": "Screen 6: User Detection History",
+        "title": "Screen 5: User Detection History",
         "file": ROOT / "output" / "playwright" / "doc_06_user_history.png",
         "navigation": "User clicks Detection History from top navigation.",
         "widgets": [
@@ -115,7 +100,7 @@ SCREENSHOTS = [
         "data_note": "User records with practical timestamps and action controls are displayed.",
     },
     {
-        "title": "Screen 7: Admin Panel",
+        "title": "Screen 6: Admin Panel",
         "file": ROOT / "output" / "playwright" / "doc_07_admin_panel.png",
         "navigation": "Login as admin -> home page shows Admin Panel controls.",
         "widgets": [
@@ -129,7 +114,7 @@ SCREENSHOTS = [
         "data_note": "Admin stats and user management controls shown with live database values.",
     },
     {
-        "title": "Screen 8: Admin Detection History",
+        "title": "Screen 7: Admin Detection History",
         "file": ROOT / "output" / "playwright" / "doc_08_admin_history.png",
         "navigation": "Admin panel -> Detection History -> apply search filter for user details.",
         "widgets": [
@@ -143,7 +128,7 @@ SCREENSHOTS = [
         "data_note": "Search keyword filtering and highlighted results are visible for admin lookup.",
     },
     {
-        "title": "Screen 9: Admin Activity Report",
+        "title": "Screen 8: Admin Activity Report",
         "file": ROOT / "output" / "playwright" / "doc_09_admin_activity.png",
         "navigation": "Admin panel -> Admin Activity -> view operation logs.",
         "widgets": [
@@ -157,7 +142,7 @@ SCREENSHOTS = [
         "data_note": "View-only report includes admin logins, delete actions, and timestamps.",
     },
     {
-        "title": "Screen 10: Admin Uploads Page",
+        "title": "Screen 9: Admin Uploads Page",
         "file": ROOT / "output" / "playwright" / "doc_10_admin_uploads.png",
         "navigation": "Admin opens /admin/uploads to inspect all user uploads.",
         "widgets": [
@@ -694,7 +679,7 @@ Documentation + Viva Prep                           [########]
     timeline_rows = [
         ["Phase", "Duration", "Outputs"],
         ["Planning and requirement finalization", "Week 1", "Feature list, role definitions, DB schema draft"],
-        ["Frontend auth and navigation", "Week 1-2", "Login/create/reset pages with validation and role redirects"],
+        ["Frontend auth and navigation", "Week 1-2", "Login/create pages with validation and role redirects"],
         ["Recognition pipeline integration", "Week 2-4", "Upload -> preprocess -> OCR/RNN -> output flow"],
         ["History + admin operations", "Week 4-5", "Detection history, admin controls, activity logs"],
         ["Testing and bug fixing", "Week 5-6", "Flow stabilization and UX fixes"],
@@ -805,7 +790,7 @@ Documentation + Viva Prep                           [########]
     story.append(Paragraph("6. Project Modules", h1))
     module_rows = [
         ["Module", "Purpose"],
-        ["Authentication Module", "Login, Create Account, Reset Password, role-aware session management"],
+        ["Authentication Module", "Login, Create Account, role-aware session management"],
         ["Recognition Module", "Upload image, preprocess, run OCR/RNN, return predictions and confidence"],
         ["Output Module", "Show recognized text in Output Window and per-file result cards"],
         ["Speech Module", "Speak output text and stop audio controls in browser"],
@@ -899,7 +884,7 @@ Documentation + Viva Prep                           [########]
     viva_steps = [
         "1. Run portal: ./run_portal.sh",
         "2. Open browser: http://127.0.0.1:5000/login (or custom port used at runtime).",
-        "3. Explain auth pages: Login, Create Account, Reset Password.",
+        "3. Explain auth pages: Login and Create Account.",
         "4. Login as user and show upload, filters, recognize, output window, and speech controls.",
         "5. Show user Detection History with View/Delete/PDF actions.",
         "6. Login as admin and explain Admin Panel cards, Add User, and user list controls.",
