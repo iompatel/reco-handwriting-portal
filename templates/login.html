@@ -47,7 +47,7 @@
       <section class="card forms{% if login_only %} forms-only{% endif %}">
         <div class="forms-head">
           <h2>Welcome Back</h2>
-          <p>Login / Create Account / Reset Password</p>
+          <p>Login / Create Account</p>
           {% if login_only %}
           <a href="{{ url_for('login_page') }}" class="text-link back-to-intro">Back To Intro</a>
           {% endif %}
@@ -111,7 +111,6 @@
           {% endif %}
           <div class="form-links">
             <button id="show-register" type="button" class="text-link">Create Account</button>
-            <button id="show-reset" type="button" class="text-link">Forgot Password?</button>
           </div>
         </form>
 
@@ -168,58 +167,6 @@
           <button type="submit">Create Account</button>
           <div class="form-links">
             <button id="show-login-from-register" type="button" class="text-link">Back to Login</button>
-          </div>
-        </form>
-
-        <form id="reset-form" class="form-block is-hidden">
-          <h2>Reset Password</h2>
-          <label>
-            E-mail / Username
-            <input
-              id="reset-username"
-              type="text"
-              required
-              minlength="3"
-              autocomplete="username"
-              placeholder="name@example.com"
-            />
-          </label>
-          <label>
-            New password
-            <div class="password-wrap">
-              <input id="reset-new-password" type="password" required minlength="6" autocomplete="new-password" />
-              <button
-                type="button"
-                class="toggle-password"
-                data-toggle-password
-                data-target="reset-new-password"
-                aria-label="Show or hide reset password"
-                aria-pressed="false"
-              >
-                Show
-              </button>
-            </div>
-          </label>
-          <label>
-            Confirm new password
-            <div class="password-wrap">
-              <input id="reset-confirm" type="password" required minlength="6" autocomplete="new-password" />
-              <button
-                type="button"
-                class="toggle-password"
-                data-toggle-password
-                data-target="reset-confirm"
-                aria-label="Show or hide confirm reset password"
-                aria-pressed="false"
-              >
-                Show
-              </button>
-            </div>
-          </label>
-          <button type="submit">Reset Password</button>
-          <div class="form-links">
-            <button id="show-login-from-reset" type="button" class="text-link">Back to Login</button>
-            <button id="show-register-from-reset" type="button" class="text-link">Create Account</button>
           </div>
         </form>
       </section>

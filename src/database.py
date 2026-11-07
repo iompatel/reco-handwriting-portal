@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 
@@ -16,7 +17,7 @@ def connect_db(db_path: str | Path) -> sqlite3.Connection:
     return conn
 
 
-def init_db(db_path: str | Path) -> None:
+def init_db(db_path: str | Path, initial_admin_password: str | None = None) -> None:
     conn = connect_db(db_path)
     conn.executescript(
         """
@@ -25,6 +26,7 @@ def init_db(db_path: str | Path) -> None:
             username TEXT NOT NULL UNIQUE,
             full_name TEXT NOT NULL DEFAULT '',
             password_hash TEXT NOT NULL,
+            firebase_uid TEXT NOT NULL DEFAULT '',
             role TEXT NOT NULL CHECK(role IN ('admin', 'user')) DEFAULT 'user',
             avatar_path TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -95,17 +97,32 @@ def init_db(db_path: str | Path) -> None:
         conn.execute(
             "ALTER TABLE users ADD COLUMN avatar_path TEXT NOT NULL DEFAULT ''"
         )
+    if "firebase_uid" not in user_columns:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN firebase_uid TEXT NOT NULL DEFAULT ''"
+        )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_firebase_uid "
+        "ON users(firebase_uid) WHERE firebase_uid <> ''"
+    )
 
     admin_exists = conn.execute(
         "SELECT id FROM users WHERE role='admin' LIMIT 1"
     ).fetchone()
     if not admin_exists:
+        password = (initial_admin_password or os.getenv("ADMIN_INITIAL_PASSWORD") or "").strip()
+        if len(password) < 8:
+            conn.close()
+            raise RuntimeError(
+                "No admin account exists. Set ADMIN_INITIAL_PASSWORD (at least 8 characters) before first startup."
+            )
+        admin_username = (os.getenv("ADMIN_USERNAME") or "admin").strip() or "admin"
         conn.execute(
             """
             INSERT INTO users (username, full_name, password_hash, role)
             VALUES (?, ?, ?, 'admin')
             """,
-            ("admin", "System Admin", generate_password_hash("admin123")),
+            (admin_username, "System Admin", generate_password_hash(password)),
         )
 
     conn.commit()

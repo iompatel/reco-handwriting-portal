@@ -110,6 +110,7 @@ async function logoutAndRedirect() {
   try {
     await apiFetch("/api/auth/logout", { method: "POST" });
   } finally {
+    sessionStorage.removeItem("reco_latest_result_v1");
     window.location.href = "/login";
   }
 }

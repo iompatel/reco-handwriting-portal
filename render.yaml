@@ -2,18 +2,26 @@ services:
   - type: web
     name: reco-handwriting-portal
     runtime: docker
-    plan: free
+    plan: starter
     autoDeploy: true
     healthCheckPath: /api/health
+    disk:
+      name: reco-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: FLASK_SECRET_KEY
         generateValue: true
+      - key: ADMIN_INITIAL_PASSWORD
+        sync: false
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
       - key: OCR_DEVICE
         value: cpu
       - key: OCR_DB_PATH
-        value: /tmp/app.db
+        value: /var/data/app.db
       - key: OCR_UPLOAD_DIR
-        value: /tmp/uploads
+        value: /var/data/uploads
       - key: FIREBASE_DATA_SYNC_ENABLED
         value: "true"
       - key: FIREBASE_SYNC_ON_STARTUP

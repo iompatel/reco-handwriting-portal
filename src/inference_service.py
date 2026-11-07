@@ -112,13 +112,23 @@ class InferenceService:
 
     def get_ocr_capabilities(self) -> dict[str, Any]:
         langs = self._load_tesseract_languages(force_refresh=True)
+        rnn_ready = TORCH_IMPORT_ERROR is None and self.checkpoint_path.exists()
+        tesseract_ready = bool(langs)
+        engines = ["auto"]
+        if rnn_ready and tesseract_ready:
+            engines.append("hybrid")
+        if tesseract_ready:
+            engines.append("tesseract")
+        if rnn_ready:
+            engines.append("rnn")
         return {
-            "engines": ["auto", "hybrid", "rnn", "tesseract"],
+            "engines": engines,
             "available_languages": langs,
             "default_language": "eng" if "eng" in langs else (langs[0] if langs else ""),
             "torch_available": TORCH_IMPORT_ERROR is None,
             "rnn_checkpoint_exists": self.checkpoint_path.exists(),
-            "tesseract_available": bool(langs),
+            "rnn_available": rnn_ready,
+            "tesseract_available": tesseract_ready,
             "tessdata_dir": str(self._tessdata_dir) if self._tessdata_dir is not None else "",
         }
 

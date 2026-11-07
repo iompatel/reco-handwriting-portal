@@ -88,19 +88,28 @@ Or install a wider set (script default set):
 Then run:
 
 ```bash
-OCR_TESSDATA_DIR=/Users/ompatel/Desktop/Reco/data/tessdata ./run_portal.sh
+OCR_TESSDATA_DIR="$PWD/data/tessdata" ./run_portal.sh
+```
+
+Before the first run, set an initial admin password (at least 8 characters):
+
+```bash
+export ADMIN_INITIAL_PASSWORD="choose-a-long-random-password"
 ```
 
 In the portal:
 - choose `OCR Engine` = `Auto` (recommended) or `Hybrid`
 - set `OCR Language Codes` like `eng+hin+spa`
 
-## Default Admin Account
+## Initial Admin Account
 
-On first run, database auto-creates:
+On first run, the database creates one admin account from environment variables:
 
-- Username: `admin`
-- Password: `admin123`
+- Username: `ADMIN_USERNAME` (default `admin`)
+- Password: `ADMIN_INITIAL_PASSWORD` (required, minimum 8 characters)
+
+If no admin exists and `ADMIN_INITIAL_PASSWORD` is unset, startup fails instead of creating a known password.
+Change the password from the admin panel after first login. Password reset by username alone was removed on purpose: it let anyone take over any account.
 
 ## Google Login (Firebase Auth)
 
@@ -162,9 +171,9 @@ Before enabling sync in production, Firebase Console me ye ensure karo:
 - Google Cloud me `Cloud Firestore API` enabled for your project
 
 How it works:
-- Every write/commit in app syncs updated tables to Firestore.
+- Every write/commit syncs only the changed rows to Firestore; deleting a user triggers one full reconcile so cascade-deleted history and sessions disappear remotely too.
 - On server startup, a full sync runs once (when `FIREBASE_SYNC_ON_STARTUP=true`).
-- On server startup, optional restore from Firestore to local SQLite runs when `FIREBASE_RESTORE_ON_STARTUP=true`.
+- On server startup, optional restore from Firestore to local SQLite runs when `FIREBASE_RESTORE_ON_STARTUP=true`. A restore is rejected if it would break foreign keys or leave no admin account.
 - If Firebase temporarily fails, sync auto-retries (interval from `FIREBASE_SYNC_RETRY_SECONDS`).
 - Admin can trigger manual full sync:
   - `POST /api/admin/firebase-sync`
@@ -175,13 +184,22 @@ Firestore collection naming:
 - `<prefix>_detection_history`
 - `<prefix>_admin_activity_logs`
 
+Lock the database down before syncing. Deploy the included rules, which deny all direct client access; the backend uses the Admin SDK, which bypasses them:
+
+```bash
+firebase deploy --only firestore:rules
+```
+
+Without this, anyone who can reach the Firestore project could write an admin user that the next restore would import.
+
 ## Deploy Live (Render + Firebase)
 
-This repo already contains `render.yaml` with disk + Firebase env placeholders.
+This repo already contains `render.yaml` with a persistent disk + Firebase env placeholders. The disk requires a paid Render instance type; the blueprint uses `starter`.
 
 1. Push this project to GitHub.
 2. In Render Dashboard, choose **New -> Blueprint** and connect the repo.
 3. While creating service, set these required env vars:
+   - `ADMIN_INITIAL_PASSWORD` (at least 8 characters; only used to create the first admin)
    - `FIREBASE_SERVICE_ACCOUNT_JSON` (full service-account JSON string)
    - `FIREBASE_WEB_API_KEY`
    - `FIREBASE_WEB_AUTH_DOMAIN`

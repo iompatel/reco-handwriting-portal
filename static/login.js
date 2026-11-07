@@ -10,15 +10,8 @@ const refs = {
   regUsername: document.getElementById("reg-username"),
   regPassword: document.getElementById("reg-password"),
   regConfirm: document.getElementById("reg-confirm"),
-  resetForm: document.getElementById("reset-form"),
-  resetUsername: document.getElementById("reset-username"),
-  resetNewPassword: document.getElementById("reset-new-password"),
-  resetConfirm: document.getElementById("reset-confirm"),
   showRegister: document.getElementById("show-register"),
-  showReset: document.getElementById("show-reset"),
   showLoginFromRegister: document.getElementById("show-login-from-register"),
-  showLoginFromReset: document.getElementById("show-login-from-reset"),
-  showRegisterFromReset: document.getElementById("show-register-from-reset"),
   googleLoginButton: document.getElementById("google-login-button"),
 };
 
@@ -80,7 +73,6 @@ function showAuthForm(view) {
   const forms = {
     login: refs.loginForm,
     register: refs.registerForm,
-    reset: refs.resetForm,
   };
   Object.entries(forms).forEach(([name, form]) => {
     if (!form) return;
@@ -192,6 +184,7 @@ async function handleGoogleLogin() {
 
     setStatus("Signing in with Google...");
     await apiFetch("/api/auth/firebase-login", { id_token: idToken });
+    sessionStorage.removeItem("reco_latest_result_v1");
     window.location.href = "/";
   } catch (error) {
     setStatus(googleLoginErrorMessage(error), "error");
@@ -203,23 +196,8 @@ refs.showRegister?.addEventListener("click", () => {
   setStatus("");
 });
 
-refs.showReset?.addEventListener("click", () => {
-  showAuthForm("reset");
-  setStatus("");
-});
-
 refs.showLoginFromRegister?.addEventListener("click", () => {
   showAuthForm("login");
-  setStatus("");
-});
-
-refs.showLoginFromReset?.addEventListener("click", () => {
-  showAuthForm("login");
-  setStatus("");
-});
-
-refs.showRegisterFromReset?.addEventListener("click", () => {
-  showAuthForm("register");
   setStatus("");
 });
 
@@ -233,6 +211,7 @@ refs.loginForm.addEventListener("submit", async (event) => {
       username: refs.loginUsername.value,
       password: refs.loginPassword.value,
     });
+    sessionStorage.removeItem("reco_latest_result_v1");
     window.location.href = "/";
   } catch (error) {
     setStatus(error.message, "error");
@@ -260,31 +239,6 @@ refs.registerForm.addEventListener("submit", async (event) => {
     refs.registerForm.reset();
     showAuthForm("login");
     setStatus("Account created. Please login.", "success");
-  } catch (error) {
-    setStatus(error.message, "error");
-  }
-});
-
-refs.resetForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-
-  if (refs.resetNewPassword.value !== refs.resetConfirm.value) {
-    setStatus("Reset passwords do not match.", "error");
-    return;
-  }
-
-  setStatus("Resetting password...");
-  try {
-    await apiFetch("/api/auth/reset-password", {
-      username: refs.resetUsername.value,
-      new_password: refs.resetNewPassword.value,
-    });
-
-    refs.loginUsername.value = refs.resetUsername.value;
-    refs.loginPassword.value = "";
-    refs.resetForm.reset();
-    showAuthForm("login");
-    setStatus("Password reset successful. Please login.", "success");
   } catch (error) {
     setStatus(error.message, "error");
   }
