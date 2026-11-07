@@ -3,24 +3,33 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0d0d0f" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="Review handwriting uploads across portal users." />
     <title>Admin Uploads | Handwriting Recognition Portal</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
   </head>
   <body>
     <div class="backdrop"></div>
     <main class="shell">
-      <header class="panel top-nav">
-        <div>
-          <p class="kicker">RNN</p>
-          <h1>Admin Uploads</h1>
+      <header class="panel top-nav app-header">
+        <div class="brand-lockup">
+          <a href="/" class="brand-mark" aria-label="Reco admin home">R</a>
+          <div class="page-heading">
+            <p class="kicker">Administration</p>
+            <h1>Uploads</h1>
+          </div>
         </div>
         <div class="user-strip">
           <div class="user-meta">
             <p id="user-name" class="user-name">User</p>
             <p id="user-role" class="user-role">role</p>
           </div>
-          <a href="/" class="btn ghost nav-link-btn">Admin Panel</a>
-          <a href="/history" class="btn ghost nav-link-btn">Detection History</a>
+          <nav class="primary-nav" aria-label="Admin navigation">
+            <a href="/" class="btn ghost nav-link-btn">Overview</a>
+            <a href="/history" class="btn ghost nav-link-btn">History</a>
+            <a href="/admin/activity-report" class="btn ghost nav-link-btn">Activity</a>
+          </nav>
           <button
             id="profile-toggle"
             type="button"
@@ -60,7 +69,11 @@
 
       <section class="panel history-panel history-page-panel">
         <div class="section-head">
-          <h2>All Uploads</h2>
+          <div>
+            <p class="kicker">Portal media</p>
+            <h2>All uploads</h2>
+            <p class="section-description">Monitor recently processed files across user accounts.</p>
+          </div>
           <button id="refresh-uploads" type="button" class="btn ghost">Refresh</button>
         </div>
         <div id="uploads-status" class="status" aria-live="polite"></div>

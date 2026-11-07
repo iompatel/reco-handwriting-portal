@@ -516,7 +516,7 @@ function hideLoader() {
 
 function setStatus(message, isError = false) {
   refs.status.textContent = message;
-  refs.status.style.color = isError ? "#b42318" : "#1f4364";
+  refs.status.classList.toggle("error", isError);
 }
 
 function setAdminLocationStatus(message, isError = false) {
@@ -1612,6 +1612,12 @@ function attachEvents() {
   refs.dropZone.addEventListener("click", (event) => {
     if (event.target.closest("#browse-btn")) return;
     openFilePicker();
+  });
+  refs.dropZone.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openFilePicker();
+    }
   });
 
   refs.contrastBoost.addEventListener("input", updateSliders);

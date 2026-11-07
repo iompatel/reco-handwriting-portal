@@ -45,7 +45,7 @@ async function apiFetch(url, options = {}) {
 function setStatus(message, isError = false) {
   if (!refs.status) return;
   refs.status.textContent = message;
-  refs.status.style.color = isError ? "#b42318" : "#1f4364";
+  refs.status.classList.toggle("error", isError);
 }
 
 function hasSpeechSupport() {

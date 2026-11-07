@@ -64,7 +64,7 @@ async function apiFetch(url, options = {}) {
 function setStatus(message, isError = false) {
   if (!refs.status) return;
   refs.status.textContent = message;
-  refs.status.style.color = isError ? "#b42318" : "#1f4364";
+  refs.status.classList.toggle("error", isError);
 }
 
 function isHistoryViewOpen() {
@@ -534,7 +534,7 @@ async function bootstrapUser() {
     if (refs.userName) refs.userName.textContent = displayName;
     if (refs.userRole) refs.userRole.textContent = displayRole;
     if (refs.historyHomeLink) {
-      refs.historyHomeLink.textContent = state.user.role === "admin" ? "Admin Panel" : "Recognize Text";
+      refs.historyHomeLink.textContent = state.user.role === "admin" ? "Overview" : "New recognition";
     }
     updateHistoryColumnVisibility();
     if (refs.profileName) refs.profileName.textContent = displayName;

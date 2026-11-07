@@ -3,23 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0d0d0f" media="(prefers-color-scheme: dark)" />
+    <meta
+      name="description"
+      content="Recognize handwriting, review results, and manage detection history."
+    />
     <title>Handwriting Recognition Portal</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
   </head>
   <body>
     <div class="backdrop"></div>
     <main class="shell">
-      <header class="panel top-nav">
-        <div>
-          <p class="kicker">RNN</p>
-          <h1>Handwriting Recognition Web Portal</h1>
+      <header class="panel top-nav app-header">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true">R</span>
+          <div class="page-heading">
+            <p class="kicker">Reco Workspace</p>
+            <h1>Handwriting Recognition</h1>
+          </div>
         </div>
         <div class="user-strip">
           <div class="user-meta">
             <p id="user-name" class="user-name">User</p>
             <p id="user-role" class="user-role">role</p>
           </div>
-          <a id="top-history-link" href="/history" class="btn ghost nav-link-btn top-history-link">Detection History</a>
+          <nav class="primary-nav" aria-label="Primary navigation">
+            <a id="top-history-link" href="/history" class="btn ghost nav-link-btn top-history-link">History</a>
+          </nav>
           <button
             id="profile-toggle"
             type="button"
@@ -57,93 +68,37 @@
         </div>
       </header>
 
-      <section id="recognition-section" class="grid">
-        <aside class="panel settings">
-          <h2>Image Filters</h2>
-
-          <label class="field split">
-            <span>Grayscale</span>
-            <input id="grayscale" type="checkbox" checked />
-          </label>
-
-          <label class="field split">
-            <span>Denoise</span>
-            <input id="denoise" type="checkbox" checked />
-          </label>
-
-          <label class="field split">
-            <span>Adaptive Threshold</span>
-            <input id="adaptive-threshold" type="checkbox" checked />
-          </label>
-
-          <label class="field split">
-            <span>Invert colors</span>
-            <input id="invert-colors" type="checkbox" />
-          </label>
-
-          <label class="field">
-            <span>Contrast Boost</span>
-            <input id="contrast-boost" type="range" min="1" max="3" step="0.1" value="1.5" />
-            <output id="contrast-boost-value">1.5</output>
-          </label>
-
-          <label class="field split">
-            <span>Handwriting Boost (multi-pass)</span>
-            <input id="handwriting-boost" type="checkbox" checked />
-          </label>
-
-          <label class="field split">
-            <span>Student Notebook Mode</span>
-            <input id="student-notebook-mode" type="checkbox" />
-          </label>
-
-          <label class="field split">
-            <span>Remove Notebook Lines</span>
-            <input id="remove-notebook-lines" type="checkbox" />
-          </label>
-
-          <label class="field split">
-            <span>Smart Text Cleanup</span>
-            <input id="smart-text-cleanup" type="checkbox" checked />
-          </label>
-
-          <label class="field">
-            <span>OCR Engine</span>
-            <select id="ocr-engine">
-              <option value="auto" selected>Auto (Recommended)</option>
-              <option value="hybrid">Hybrid (RNN + OCR)</option>
-              <option value="tesseract">Tesseract Only</option>
-              <option value="rnn">RNN Only</option>
-            </select>
-          </label>
-
-          <label class="field">
-            <span>OCR Language Codes</span>
-            <input id="ocr-languages" type="text" value="auto" placeholder="auto or eng+hin+spa" />
-            <small id="ocr-languages-help" class="field-help">Loading OCR language support...</small>
-          </label>
-
-          <label class="field">
-            <span>Speech rate</span>
-            <input id="speech-rate" type="range" min="0.6" max="1.4" step="0.05" value="1" />
-            <output id="speech-rate-value">1.0</output>
-          </label>
-        </aside>
-
-        <section class="panel workspace">
-          <h2>Upload Handwriting Images</h2>
-          <div id="drop-zone" class="drop-zone">
+      <section id="recognition-section" class="recognition-layout">
+        <section class="panel workspace task-panel">
+          <div class="section-intro">
+            <div>
+              <p class="kicker">New recognition</p>
+              <h2>Turn handwriting into editable text</h2>
+              <p class="section-description">Add one or more clear images. Reco will prepare, read, and save each result to your history.</p>
+            </div>
+          </div>
+          <div
+            id="drop-zone"
+            class="drop-zone"
+            role="button"
+            tabindex="0"
+            aria-label="Choose handwriting images or drop them here"
+          >
             <input id="image-input" class="visually-hidden" type="file" accept="image/*" multiple />
-            <p>Drag and drop images here</p>
-            <label id="browse-btn" for="image-input" class="btn ghost">Browse Files</label>
-            <small>Supports PNG, JPG, JPEG, BMP, TIF, TIFF</small>
+            <svg class="drop-zone-icon" viewBox="0 0 32 32" aria-hidden="true">
+              <path d="M16 21V7m0 0-5 5m5-5 5 5M8 19v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5" />
+            </svg>
+            <p>Drop handwriting images here</p>
+            <span class="drop-zone-copy">or choose them from your device</span>
+            <label id="browse-btn" for="image-input" class="btn primary">Choose images</label>
+            <small>PNG, JPG, BMP, TIF, or TIFF · up to 20 images</small>
           </div>
 
           <div class="toolbar">
             <p id="file-count">No files selected</p>
             <div class="toolbar-actions">
               <button id="clear-btn" type="button" class="btn ghost" disabled>Clear</button>
-              <button id="run-btn" type="button" class="btn primary" disabled>Recognize Text</button>
+              <button id="run-btn" type="button" class="btn primary" disabled>Recognize text</button>
             </div>
           </div>
 
@@ -151,33 +106,117 @@
 
           <div id="status" class="status" aria-live="polite"></div>
         </section>
+
+        <aside class="panel settings">
+          <details class="settings-disclosure">
+            <summary>
+              <span>
+                <strong>Recognition settings</strong>
+                <small>Automatic defaults are ready</small>
+              </span>
+              <span class="summary-action" aria-hidden="true">Customize</span>
+            </summary>
+
+            <div class="settings-content">
+              <section class="settings-group" aria-labelledby="recognition-options-title">
+                <div class="settings-group-head">
+                  <h3 id="recognition-options-title">Recognition</h3>
+                  <p>Choose how text and language are detected.</p>
+                </div>
+                <div class="control-grid">
+                  <label class="field">
+                    <span>OCR engine</span>
+                    <select id="ocr-engine">
+                      <option value="auto" selected>Auto · Recommended</option>
+                      <option value="hybrid">Hybrid · RNN + OCR</option>
+                      <option value="tesseract">Tesseract only</option>
+                      <option value="rnn">RNN only</option>
+                    </select>
+                  </label>
+
+                  <label class="field">
+                    <span>Language codes</span>
+                    <input id="ocr-languages" type="text" value="auto" placeholder="auto or eng+hin+spa" />
+                    <small id="ocr-languages-help" class="field-help">Loading language support...</small>
+                  </label>
+                </div>
+              </section>
+
+              <section class="settings-group" aria-labelledby="image-options-title">
+                <div class="settings-group-head">
+                  <h3 id="image-options-title">Image preparation</h3>
+                  <p>Use the defaults first, then adjust only if the page is difficult to read.</p>
+                </div>
+                <div class="toggle-grid">
+                  <label class="field split toggle-field">
+                    <span>Grayscale</span>
+                    <input id="grayscale" type="checkbox" checked />
+                  </label>
+                  <label class="field split toggle-field">
+                    <span>Denoise</span>
+                    <input id="denoise" type="checkbox" checked />
+                  </label>
+                  <label class="field split toggle-field">
+                    <span>Adaptive threshold</span>
+                    <input id="adaptive-threshold" type="checkbox" checked />
+                  </label>
+                  <label class="field split toggle-field">
+                    <span>Smart text cleanup</span>
+                    <input id="smart-text-cleanup" type="checkbox" checked />
+                  </label>
+                  <label class="field split toggle-field">
+                    <span>Handwriting boost</span>
+                    <input id="handwriting-boost" type="checkbox" checked />
+                  </label>
+                  <label class="field split toggle-field">
+                    <span>Invert colors</span>
+                    <input id="invert-colors" type="checkbox" />
+                  </label>
+                  <label class="field split toggle-field">
+                    <span>Notebook mode</span>
+                    <input id="student-notebook-mode" type="checkbox" />
+                  </label>
+                  <label class="field split toggle-field">
+                    <span>Remove notebook lines</span>
+                    <input id="remove-notebook-lines" type="checkbox" />
+                  </label>
+                </div>
+              </section>
+
+              <section class="settings-group" aria-labelledby="fine-tuning-title">
+                <div class="settings-group-head">
+                  <h3 id="fine-tuning-title">Fine tuning</h3>
+                </div>
+                <div class="range-grid">
+                  <label class="field range-field">
+                    <span>Contrast boost <output id="contrast-boost-value">1.5</output></span>
+                    <input id="contrast-boost" type="range" min="1" max="3" step="0.1" value="1.5" />
+                  </label>
+                  <label class="field range-field">
+                    <span>Speech rate <output id="speech-rate-value">1.0</output></span>
+                    <input id="speech-rate" type="range" min="0.6" max="1.4" step="0.05" value="1" />
+                  </label>
+                </div>
+              </section>
+            </div>
+          </details>
+        </aside>
       </section>
 
       <section id="admin-section" class="panel admin-panel hidden">
         <div class="admin-hero">
           <div>
-            <p class="admin-kicker">Control Center</p>
-            <h2>Admin Panel</h2>
-            <p class="admin-subtitle">Manage users, monitor activity, and navigate admin tools quickly.</p>
+            <p class="kicker">Administration</p>
+            <h2>Portal overview</h2>
+            <p class="admin-subtitle">Manage access, review usage, and export portal data.</p>
           </div>
           <div class="section-actions">
-            <a href="/history" class="btn ghost nav-link-btn">Detection History</a>
-            <a href="/admin/activity-report" class="btn ghost nav-link-btn">Admin Activity</a>
-            <button id="download-admin-export" type="button" class="btn primary">Download All User Data</button>
+            <a href="/history" class="btn ghost nav-link-btn">History</a>
+            <a href="/admin/uploads" class="btn ghost nav-link-btn">Uploads</a>
+            <a href="/admin/activity-report" class="btn ghost nav-link-btn">Activity</a>
+            <button id="download-admin-export" type="button" class="btn primary">Export data</button>
             <button id="refresh-admin" type="button" class="btn ghost">Refresh</button>
           </div>
-        </div>
-        <p class="admin-note">Simple controls: add users, search users, and manage active records quickly.</p>
-
-        <div class="admin-live-row">
-          <article class="admin-live-card">
-            <p class="admin-live-label">Date & Time</p>
-            <p id="admin-live-datetime" class="admin-live-value">--</p>
-          </article>
-          <article class="admin-live-card">
-            <p class="admin-live-label">Current Location</p>
-            <p id="admin-live-location" class="admin-live-value" role="button" tabindex="0" title="Click to show your city">Click to show city</p>
-          </article>
         </div>
 
         <div class="stats-row">
@@ -195,42 +234,84 @@
           </article>
         </div>
 
+        <div class="admin-live-row" aria-label="Session context">
+          <article class="admin-live-card">
+            <p class="admin-live-label">Local time</p>
+            <p id="admin-live-datetime" class="admin-live-value">--</p>
+          </article>
+          <article class="admin-live-card">
+            <p class="admin-live-label">Location</p>
+            <p id="admin-live-location" class="admin-live-value interactive-value" role="button" tabindex="0" title="Show your city">Show my city</p>
+          </article>
+        </div>
+
         <div class="admin-content-grid">
           <div class="admin-card admin-user-create-card">
             <form id="admin-user-form" class="admin-form">
-              <h3>Add User</h3>
-              <input id="admin-full-name" type="text" placeholder="Full name" required />
-              <input id="admin-username" type="text" placeholder="Username" required />
-              <div class="admin-password-wrap">
-                <input id="admin-password" type="password" placeholder="Password" required minlength="6" />
-                <button
-                  id="admin-password-toggle"
-                  type="button"
-                  class="btn ghost admin-pass-toggle"
-                  aria-label="Show or hide add user password"
-                  aria-pressed="false"
-                >
-                  Show
-                </button>
+              <div class="admin-card-head">
+                <div>
+                  <p class="kicker">New account</p>
+                  <h3>Add a user</h3>
+                </div>
+                <p>Choose the least privilege they need.</p>
               </div>
-              <select id="admin-role">
-                <option value="user" selected>User</option>
-                <option value="admin">Admin</option>
-              </select>
-              <button type="submit" class="btn primary">Add User</button>
+              <div class="admin-form-fields">
+                <label class="field">
+                  <span>Full name</span>
+                  <input id="admin-full-name" type="text" autocomplete="name" placeholder="Avery Patel" required />
+                </label>
+                <label class="field">
+                  <span>E-mail or username</span>
+                  <input id="admin-username" type="text" autocomplete="username" placeholder="avery@example.com" required />
+                </label>
+                <label class="field">
+                  <span>Temporary password</span>
+                  <div class="admin-password-wrap">
+                    <input id="admin-password" type="password" autocomplete="new-password" placeholder="At least 6 characters" required minlength="6" />
+                    <button
+                      id="admin-password-toggle"
+                      type="button"
+                      class="btn ghost admin-pass-toggle"
+                      aria-label="Show or hide add user password"
+                      aria-pressed="false"
+                    >
+                      Show
+                    </button>
+                  </div>
+                </label>
+                <label class="field">
+                  <span>Role</span>
+                  <select id="admin-role">
+                    <option value="user" selected>User</option>
+                    <option value="admin">Administrator</option>
+                  </select>
+                </label>
+              </div>
+              <button type="submit" class="btn primary">Create user</button>
             </form>
           </div>
           <div class="admin-card admin-users-card">
-            <h3>Users</h3>
-            <div class="admin-users-toolbar">
-              <input id="admin-user-search" type="text" placeholder="Search by name or e-mail" />
-              <select id="admin-user-role-filter">
-                <option value="all" selected>All Roles</option>
-                <option value="admin">Admin</option>
-                <option value="user">User</option>
-              </select>
-              <button id="admin-user-filter-clear" type="button" class="btn ghost">Clear</button>
+            <div class="admin-card-head">
+              <div>
+                <p class="kicker">Directory</p>
+                <h3>Users</h3>
+              </div>
               <p id="admin-users-count" class="admin-users-count">0 users</p>
+            </div>
+            <div class="admin-users-toolbar">
+              <label class="filter-field filter-search">
+                <span>Search</span>
+                <input id="admin-user-search" type="search" placeholder="Name or e-mail" />
+              </label>
+              <label class="filter-field">
+                <span>Role</span>
+                <select id="admin-user-role-filter">
+                  <option value="all" selected>All roles</option>
+                  <option value="admin">Administrators</option>
+                  <option value="user">Users</option>
+                </select>
+              </label>
+              <button id="admin-user-filter-clear" type="button" class="btn ghost">Clear</button>
             </div>
             <div class="table-wrap">
               <table class="data-table">

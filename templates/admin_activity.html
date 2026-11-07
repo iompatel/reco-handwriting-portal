@@ -3,24 +3,33 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0d0d0f" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="Review administrator sign-ins and portal operations." />
     <title>Admin Activity | Handwriting Recognition Portal</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
   </head>
   <body>
     <div class="backdrop"></div>
     <main class="shell">
-      <header class="panel top-nav">
-        <div>
-          <p class="kicker">RNN</p>
-          <h1>Admin Activity</h1>
+      <header class="panel top-nav app-header">
+        <div class="brand-lockup">
+          <a href="/" class="brand-mark" aria-label="Reco admin home">R</a>
+          <div class="page-heading">
+            <p class="kicker">Administration</p>
+            <h1>Activity</h1>
+          </div>
         </div>
         <div class="user-strip">
           <div class="user-meta">
             <p id="user-name" class="user-name">User</p>
             <p id="user-role" class="user-role">role</p>
           </div>
-          <a href="/" class="btn ghost nav-link-btn">Admin Panel</a>
-          <a href="/history" class="btn ghost nav-link-btn">Detection History</a>
+          <nav class="primary-nav" aria-label="Admin navigation">
+            <a href="/" class="btn ghost nav-link-btn">Overview</a>
+            <a href="/history" class="btn ghost nav-link-btn">History</a>
+            <a href="/admin/uploads" class="btn ghost nav-link-btn">Uploads</a>
+          </nav>
           <button
             id="profile-toggle"
             type="button"
@@ -60,15 +69,24 @@
 
       <section class="panel history-panel history-page-panel">
         <div class="section-head">
-          <h2>View Report</h2>
+          <div>
+            <p class="kicker">Audit trail</p>
+            <h2>Administrator activity</h2>
+            <p class="section-description">A read-only record of sign-ins and administrative changes.</p>
+          </div>
           <button id="refresh-activity" type="button" class="btn ghost">Refresh</button>
         </div>
-        <p class="admin-activity-note">View-only report of admin login times and operations performed.</p>
         <div class="history-filter-toolbar">
-          <input id="activity-search-input" type="text" placeholder="Search by admin, operation, target or details" />
-          <select id="activity-action-filter">
-            <option value="all" selected>All Operations</option>
-          </select>
+          <label class="filter-field filter-search">
+            <span>Search activity</span>
+            <input id="activity-search-input" type="search" placeholder="Admin, operation, or target" />
+          </label>
+          <label class="filter-field">
+            <span>Operation</span>
+            <select id="activity-action-filter">
+              <option value="all" selected>All operations</option>
+            </select>
+          </label>
           <button id="activity-filter-clear" type="button" class="btn ghost">Clear</button>
           <p id="activity-count" class="history-filter-count">0 records</p>
         </div>

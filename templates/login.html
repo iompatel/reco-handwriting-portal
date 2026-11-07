@@ -3,6 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0d0d0f" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="Sign in to the Reco handwriting recognition workspace." />
     <title>Login | Handwriting Portal</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='login.css') }}" />
   </head>
@@ -12,52 +15,65 @@
     <main class="auth-shell">
       {% if not login_only %}
       <section class="card intro">
-        <p class="kicker">RNN + OCR Workspace</p>
-        <h1>Handwriting Recognition Portal</h1>
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true">R</span>
+          <span>Reco</span>
+        </div>
+        <p class="kicker">Handwriting workspace</p>
+        <h1>From notebook page to useful text.</h1>
         <p class="intro-text">
-          Upload notebook images, run text detection, check results/history, and manage records from a single web portal.
+          Upload handwritten notes, review the recognized text, and keep every result organized in one focused workspace.
         </p>
 
         <div class="feature-grid">
           <article class="feature-pill">
-            <h3>Smart Detection</h3>
-            <p>RNN + OCR hybrid pipeline for handwritten notes.</p>
+            <span class="feature-number" aria-hidden="true">01</span>
+            <div>
+              <h3>Recognize</h3>
+              <p>Automatic OCR settings handle everyday notebook images.</p>
+            </div>
           </article>
           <article class="feature-pill">
-            <h3>Cleaner Results</h3>
-            <p>Filters for denoise, threshold, contrast, and notebook mode.</p>
+            <span class="feature-number" aria-hidden="true">02</span>
+            <div>
+              <h3>Refine</h3>
+              <p>Use focused controls only when an image needs extra help.</p>
+            </div>
           </article>
           <article class="feature-pill">
-            <h3>Role Support</h3>
-            <p>User history controls and admin management in one portal.</p>
+            <span class="feature-number" aria-hidden="true">03</span>
+            <div>
+              <h3>Review</h3>
+              <p>Return to saved text, images, and exports whenever you need them.</p>
+            </div>
           </article>
         </div>
 
         <div class="info-strip">
-          <span>Secure auth flow</span>
-          <span>Speech support</span>
-          <span>SQLite backed</span>
+          <span>Private workspace</span>
+          <span>Speech playback</span>
+          <span>PDF export</span>
         </div>
         <a href="{{ url_for('login_form_page') }}" class="get-started-mobile">
-          Get Started
+          Continue to sign in
         </a>
       </section>
       {% endif %}
 
-      <section class="card forms{% if login_only %} forms-only{% endif %}">
-        <div class="forms-head">
-          <h2>Welcome Back</h2>
-          <p>Login / Create Account</p>
-          {% if login_only %}
-          <a href="{{ url_for('login_page') }}" class="text-link back-to-intro">Back To Intro</a>
-          {% endif %}
-        </div>
-        <div id="auth-status" class="status"></div>
+      <section class="card forms{% if login_only %} forms-only{% endif %}" aria-label="Account access">
+        {% if login_only %}
+        <a href="{{ url_for('login_page') }}" class="text-link back-to-intro">Back to overview</a>
+        {% endif %}
+        <div id="auth-status" class="status" aria-live="polite"></div>
 
         <form id="login-form" class="form-block">
-          <h2>Login</h2>
+          <div class="form-head">
+            <p class="kicker">Portal access</p>
+            <h2>Welcome back</h2>
+            <p>Sign in to continue to your recognition workspace.</p>
+          </div>
           <label>
-            E-mail / Username
+            E-mail or username
             <input
               id="login-username"
               type="text"
@@ -74,7 +90,7 @@
                type="password"
                required minlength="6"
                autocomplete="current-password"
-               placeholder="Your Password"
+               placeholder="Your password"
               />
               <button
                 type="button"
@@ -88,7 +104,7 @@
               </button>
             </div>
           </label>
-          <button type="submit">Login</button>
+          <button type="submit">Sign in</button>
           <div class="oauth-divider" role="separator" aria-label="or">
             <span>or</span>
           </div>
@@ -110,63 +126,70 @@
           <p class="oauth-note">Google login is disabled. Ask admin to configure Firebase keys.</p>
           {% endif %}
           <div class="form-links">
-            <button id="show-register" type="button" class="text-link">Create Account</button>
+            <span>New to Reco?</span>
+            <button id="show-register" type="button" class="text-link">Create an account</button>
           </div>
         </form>
 
         <form id="register-form" class="form-block is-hidden">
-          <h2>Create Account</h2>
-          <label>
-            Full name
-            <input id="reg-full-name" type="text" required minlength="2" autocomplete="name" placeholder="Enter your name" />
-          </label>
-          <label>
-            E-mail / Username
-            <input
-              id="reg-username"
-              type="text"
-              required
-              minlength="3"
-              autocomplete="username"
-              placeholder="name@example.com"
-            />
-          </label>
-          <label>
-            Password
-            <div class="password-wrap">
-              <input id="reg-password" type="password" required minlength="6" autocomplete="new-password" placeholder="Enter Password"/>
-              <button
-                type="button"
-                class="toggle-password"
-                data-toggle-password
-                data-target="reg-password"
-                aria-label="Show or hide create account password"
-                aria-pressed="false"
-              >
-                Show
-              </button>
-            </div>
-          </label>
-          <label>
-            Confirm password
-            <div class="password-wrap">
-              <input id="reg-confirm" type="password" required minlength="6" autocomplete="new-password" />
-              <button
-                type="button"
-                class="toggle-password"
-                data-toggle-password
-                data-target="reg-confirm"
-                aria-label="Show or hide confirm password"
-                aria-pressed="false"
-                placeholder="Confirm password"
-              >
-                Show
-              </button>
-            </div>
-          </label>
+          <div class="form-head">
+            <p class="kicker">New workspace</p>
+            <h2>Create your account</h2>
+            <p>Use a name you will recognize in saved results and exports.</p>
+          </div>
+          <div class="register-fields">
+            <label>
+              Full name
+              <input id="reg-full-name" type="text" required minlength="2" autocomplete="name" placeholder="Avery Patel" />
+            </label>
+            <label>
+              E-mail or username
+              <input
+                id="reg-username"
+                type="text"
+                required
+                minlength="3"
+                autocomplete="username"
+                placeholder="avery@example.com"
+              />
+            </label>
+            <label>
+              Password
+              <div class="password-wrap">
+                <input id="reg-password" type="password" required minlength="6" autocomplete="new-password" placeholder="At least 6 characters" />
+                <button
+                  type="button"
+                  class="toggle-password"
+                  data-toggle-password
+                  data-target="reg-password"
+                  aria-label="Show or hide create account password"
+                  aria-pressed="false"
+                >
+                  Show
+                </button>
+              </div>
+            </label>
+            <label>
+              Confirm password
+              <div class="password-wrap">
+                <input id="reg-confirm" type="password" required minlength="6" autocomplete="new-password" placeholder="Repeat your password" />
+                <button
+                  type="button"
+                  class="toggle-password"
+                  data-toggle-password
+                  data-target="reg-confirm"
+                  aria-label="Show or hide confirm password"
+                  aria-pressed="false"
+                >
+                  Show
+                </button>
+              </div>
+            </label>
+          </div>
           <button type="submit">Create Account</button>
           <div class="form-links">
-            <button id="show-login-from-register" type="button" class="text-link">Back to Login</button>
+            <span>Already have an account?</span>
+            <button id="show-login-from-register" type="button" class="text-link">Sign in</button>
           </div>
         </form>
       </section>

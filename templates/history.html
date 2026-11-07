@@ -3,23 +3,31 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0d0d0f" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="Review and manage saved handwriting recognition results." />
     <title>Detection History | Handwriting Recognition Portal</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
   </head>
   <body>
     <div class="backdrop"></div>
     <main class="shell">
-      <header class="panel top-nav">
-        <div>
-          <p class="kicker">RNN</p>
-          <h1>Detection History</h1>
+      <header class="panel top-nav app-header">
+        <div class="brand-lockup">
+          <a href="/" class="brand-mark" aria-label="Reco home">R</a>
+          <div class="page-heading">
+            <p class="kicker">Reco Workspace</p>
+            <h1>History</h1>
+          </div>
         </div>
         <div class="user-strip">
           <div class="user-meta">
             <p id="user-name" class="user-name">User</p>
             <p id="user-role" class="user-role">role</p>
           </div>
-          <a id="history-home-link" href="/" class="btn ghost nav-link-btn">Recognize Text</a>
+          <nav class="primary-nav" aria-label="Primary navigation">
+            <a id="history-home-link" href="/" class="btn ghost nav-link-btn">New recognition</a>
+          </nav>
           <button
             id="profile-toggle"
             type="button"
@@ -59,18 +67,28 @@
 
       <section class="panel history-panel history-page-panel">
         <div class="section-head">
-          <h2>Detection History</h2>
+          <div>
+            <p class="kicker">Saved work</p>
+            <h2>Recognition history</h2>
+            <p class="section-description">Open a result to review its text and original image.</p>
+          </div>
           <button id="refresh-history" type="button" class="btn ghost">Refresh</button>
         </div>
         <div id="admin-history-toolbar" class="history-filter-toolbar hidden">
-          <input
-            id="history-search-input"
-            type="text"
-            placeholder="Search by user id, name, e-mail, file, or text"
-          />
-          <select id="history-source-filter">
-            <option value="all" selected>All Sources</option>
-          </select>
+          <label class="filter-field filter-search">
+            <span>Search records</span>
+            <input
+              id="history-search-input"
+              type="search"
+              placeholder="User, file, or recognized text"
+            />
+          </label>
+          <label class="filter-field">
+            <span>Source</span>
+            <select id="history-source-filter">
+              <option value="all" selected>All sources</option>
+            </select>
+          </label>
           <button id="history-filter-clear" type="button" class="btn ghost">Clear</button>
           <p id="history-filter-count" class="history-filter-count">0 records</p>
         </div>

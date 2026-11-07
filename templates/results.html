@@ -3,24 +3,32 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0d0d0f" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="Review recognized handwriting text and confidence details." />
     <title>Recognition Results | Handwriting Recognition Portal</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
   </head>
   <body>
     <div class="backdrop"></div>
     <main class="shell">
-      <header class="panel top-nav">
-        <div>
-          <p class="kicker">RNN</p>
-          <h1>Recognition Results</h1>
+      <header class="panel top-nav app-header">
+        <div class="brand-lockup">
+          <a href="/" class="brand-mark" aria-label="Reco home">R</a>
+          <div class="page-heading">
+            <p class="kicker">Reco Workspace</p>
+            <h1>Results</h1>
+          </div>
         </div>
         <div class="user-strip">
           <div class="user-meta">
             <p id="user-name" class="user-name">User</p>
             <p id="user-role" class="user-role">role</p>
           </div>
-          <a href="/" class="btn ghost nav-link-btn">Recognize Text</a>
-          <a href="/history" class="btn ghost nav-link-btn">Detection History</a>
+          <nav class="primary-nav" aria-label="Primary navigation">
+            <a href="/" class="btn ghost nav-link-btn">New recognition</a>
+            <a href="/history" class="btn ghost nav-link-btn">History</a>
+          </nav>
           <button
             id="profile-toggle"
             type="button"
@@ -58,13 +66,23 @@
         </div>
       </header>
 
-      <section class="panel workspace">
+      <section class="panel workspace results-workspace">
+        <div class="section-intro">
+          <div>
+            <p class="kicker">Latest recognition</p>
+            <h2>Review your text</h2>
+            <p class="section-description">Copy the combined output or inspect confidence and alternatives for each image.</p>
+          </div>
+        </div>
         <div id="results-status" class="status" aria-live="polite"></div>
 
         <section class="output-window">
           <div class="output-head">
-            <h3>Output Window</h3>
-            <button id="copy-output" class="btn ghost" type="button" disabled>Copy Text</button>
+            <div>
+              <p class="kicker">Combined output</p>
+              <h3>Recognized text</h3>
+            </div>
+            <button id="copy-output" class="btn ghost" type="button" disabled>Copy text</button>
           </div>
           <textarea
             id="output-text"
@@ -76,7 +94,7 @@
         <section id="results" class="results hidden">
           <div class="results-head">
             <div>
-              <h3>Recognition Results</h3>
+              <h3>Image details</h3>
               <p id="summary"></p>
             </div>
             <div class="results-actions">

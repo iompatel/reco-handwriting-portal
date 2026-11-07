@@ -43,7 +43,7 @@ async function apiFetch(url, options = {}) {
 function setStatus(message, isError = false) {
   if (!refs.activityStatus) return;
   refs.activityStatus.textContent = message;
-  refs.activityStatus.style.color = isError ? "#b42318" : "#1f4364";
+  refs.activityStatus.classList.toggle("error", isError);
 }
 
 function formatDate(value) {
